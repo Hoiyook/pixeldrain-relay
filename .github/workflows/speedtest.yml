@@ -1,0 +1,18 @@
+name: speedtest
+on:
+  workflow_dispatch: {}
+jobs:
+  speedtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: pixeldrain speed test
+        run: |
+          echo "=== 100MB range test ==="
+          curl -sS -L -o /dev/null -w "RESULT100: %{size_download} bytes in %{time_total}s => %{speed_download} B/s" -r 0-104857599 "https://pixeldrain.com/api/file/5g9MxcMP?download"
+          echo
+          echo "=== aria2 16-connection 45s test ==="
+          sudo apt-get install -y aria2 >/dev/null 2>&1 || true
+          timeout 45 aria2c -x16 -s16 -k1M --file-allocation=none --summary-interval=0 -d /tmp -o test.bin "https://pixeldrain.com/api/file/5g9MxcMP?download" >/dev/null 2>&1 || true
+          bytes=$(stat -c%s /tmp/test.bin 2>/dev/null || echo 0)
+          echo "RESULT_ARIA2: $bytes bytes in 45s => $((bytes/45/1048576)) MB/s"

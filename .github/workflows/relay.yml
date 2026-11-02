@@ -1,0 +1,38 @@
+name: relay
+on:
+  workflow_dispatch: {}
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Relay
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create pd-relay --title pd-relay --notes relay 2>/dev/null || true
+          while IFS=$'\t' read -r id name size sha; do
+            exist=$(gh release view pd-relay --json assets --jq "[.assets[].name | select(startswith(\"${name}.part-\"))] | length")
+            if [ "$exist" -gt 0 ]; then echo "SKIP $name"; continue; fi
+            echo "=== RELAY $name ($id) $size bytes ==="
+            ok=0
+            for attempt in 1 2 3; do
+              rm -f /tmp/"${name}".part-*
+              curl -sS -L --retry 8 --retry-delay 10 --connect-timeout 30 "https://pixeldrain.com/api/file/$id?download" | split -b 1900m -d - "/tmp/${name}.part-"
+              total=$(du -bc /tmp/"${name}".part-* 2>/dev/null | tail -1 | cut -f1 || true)
+              if [ "$total" = "$size" ]; then
+                calc=$(cat /tmp/"${name}".part-* | sha256sum | awk '{print $1}')
+                if [ "$calc" = "$sha" ]; then ok=1; break; fi
+              fi
+              echo "attempt $attempt failed (size=$total)"
+            done
+            [ "$ok" = 1 ] || { echo "FILE_FAILED $name"; exit 1; }
+            gh release upload pd-relay /tmp/"${name}".part-* --clobber
+            rm -f /tmp/"${name}".part-*
+            echo "UPLOADED $name"
+          done < files.tsv
+          echo "ALL_RELAY_DONE"

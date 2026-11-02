@@ -1,23 +1,30 @@
 name: relay
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'filename to relay'
+        required: true
+        type: string
 jobs:
   relay:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 120
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Relay
+      - name: Relay one file
         env:
           GH_TOKEN: ${{ github.token }}
+          ONLY: ${{ inputs.only }}
         run: |
           set -euo pipefail
           gh release create pd-relay --title pd-relay --notes relay 2>/dev/null || true
           while IFS=$'\t' read -r id name size sha; do
+            [ "$name" = "$ONLY" ] || continue
             exist=$(gh release view pd-relay --json assets --jq "[.assets[].name | select(startswith(\"${name}.part-\"))] | length")
-            if [ "$exist" -gt 0 ]; then echo "SKIP $name"; continue; fi
+            if [ "$exist" -gt 0 ]; then echo "SKIP $name"; exit 0; fi
             echo "=== RELAY $name ($id) $size bytes ==="
             ok=0
             for attempt in 1 2 3; do
@@ -34,5 +41,7 @@ jobs:
             gh release upload pd-relay /tmp/"${name}".part-* --clobber
             rm -f /tmp/"${name}".part-*
             echo "UPLOADED $name"
+            exit 0
           done < files.tsv
-          echo "ALL_RELAY_DONE"
+          echo "NOT_FOUND $ONLY"
+          exit 1

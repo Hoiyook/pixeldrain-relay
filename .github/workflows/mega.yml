@@ -39,10 +39,24 @@ jobs:
           done < mega_files.tsv
           rm -rf /tmp/prefill
           echo "预填占用: $(du -sB1 /tmp/dl | cut -f1)"
-          # 下载直到配额死或全部完成 (40分钟保险)
-          timeout 2400 mega-get "$LINK" /tmp/dl > /tmp/mg.log 2>&1 || true
+          # 下载直到配额死或全部完成 (40分钟保险), 全程观测
+          stdbuf -oL mega-get "$LINK" /tmp/dl > /tmp/mg.log 2>&1 &
+          MGPID=$!
+          START=$(date +%s); LAST=""; FROZEN=0
+          while kill -0 $MGPID 2>/dev/null; do
+            sleep 30
+            NOW=$(date +%s)
+            DL=$(du -sB1 /tmp/dl 2>/dev/null | cut -f1)
+            Q=$(grep -ci "quota" /tmp/mg.log 2>/dev/null || echo 0)
+            echo "[t=$((NOW - START))s] 目录: $DL, 配额报错: $Q, 最近: $(tail -1 /tmp/mg.log 2>/dev/null | tail -c 60)"
+            if [ "$DL" = "$LAST" ]; then FROZEN=$((FROZEN+1)); [ $FROZEN -ge 4 ] && { echo "冻结中止"; kill $MGPID; break; }; else FROZEN=0; fi
+            LAST=$DL
+            [ $((NOW - START)) -gt 2700 ] && { echo "40分钟保险中止"; kill $MGPID; break; }
+          done
+          kill $MGPID 2>/dev/null || true
+          sleep 3
           echo "mega-get 结束, 目录: $(du -sB1 /tmp/dl | cut -f1)"
-          grep -c "quota" /tmp/mg.log 2>/dev/null | awk '{print "配额报错行: "$1}'
+          tail -c 400 /tmp/mg.log'
           # 上传所有新完成文件
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done2.txt || true
           UP=0; MISS=0

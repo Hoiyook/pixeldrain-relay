@@ -74,27 +74,28 @@ class Mega:
         out = {}
         for n in r['f']:
             h, p, t = n.get('h'), n.get('p'), n.get('t', 1)
-            fullkey = None
-            kf = n.get('k', '')
-            if kf:
-                segs = kf.split('/')
-                chosen = segs[-1]
-                for s in segs:
-                    if ':' in s and s.split(':', 1)[0] == self.handle:
-                        chosen = s
-                part = chosen.split(':')[-1]
+            fullkey, name = None, ''
+            size = int(n.get('s', 0) or 0)
+            ablob = b64d(n.get('a', '')) if n.get('a') else b''
+            for seg in n.get('k', '').split('/'):
+                part = seg.split(':')[-1]
                 try:
-                    fullkey = AES.new(self.mkey, AES.MODE_ECB).decrypt(b64d(part))
+                    fk = AES.new(self.mkey, AES.MODE_ECB).decrypt(b64d(part))
                 except Exception:
-                    fullkey = None
-            name, size = '', int(n.get('s', 0) or 0)
-            if fullkey:
-                ak = xor16(fullkey[:16], fullkey[16:]) if t == 0 else fullkey[:16]
-                try:
-                    blob = AES.new(ak, AES.MODE_CBC, b'\0' * 16).decrypt(b64d(n.get('a', '')))
-                    name = json.loads(blob.rstrip(b'\x00').decode('utf-8', 'replace')).get('n', '')
-                except Exception:
-                    name = ''
+                    continue
+                if len(fk) not in (16, 32):
+                    continue
+                ak = xor16(fk[:16], fk[16:]) if t == 0 and len(fk) == 32 else fk[:16]
+                if ablob:
+                    try:
+                        dec = AES.new(ak, AES.MODE_CBC, b'\0' * 16).decrypt(ablob)
+                        if not dec.startswith(b'MEGA'):
+                            continue
+                        name = json.loads(dec[4:].rstrip(b'\x00').decode('utf-8', 'replace')).get('n', '')
+                    except Exception:
+                        continue
+                fullkey = fk
+                break
             out[h] = {'p': p, 't': t, 'name': name, 'size': size, 'key': fullkey}
         self._nodes = out
         return out

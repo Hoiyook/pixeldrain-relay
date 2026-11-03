@@ -4,34 +4,51 @@ on:
     inputs:
       mode:  {required: true, type: string}
       link:  {required: true, type: string}
+      tag:   {required: false, type: string, default: ''}
 jobs:
   run:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
       - run: pip install --quiet pycryptodome 2>/dev/null || pip install --quiet --break-system-packages pycryptodome || true
-      - name: V2 probe
-        if: ${{ inputs.mode == 'v2probe' }}
-        env:
-          LINK: ${{ inputs.link }}
+      - name: Install megacmd
         run: |
-          cat > /tmp/v2.py <<'PYSRC'
-          import json, random, urllib.request
-          UA = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36'}
-          def call(seq, extra=''):
-              url = 'https://g.api.mega.co.nz/cs?id=' + str(random.randint(0, 2**31)) + extra
-              req = urllib.request.Request(url, data=json.dumps(seq).encode(),
-                  headers={'Content-Type': 'text/plain;charset=UTF-8', 'Referer': 'https://mega.nz/', **UA})
-              return json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
-          fh = 'gcw2nTSK'
-          ff = 'hGghhQaZ'
-          folder = 'ZTYzCBxD'
-          print('T1 file-solo:', json.dumps(call([{'a':'g','v':2,'g':1,'ssl':1,'p':fh}]))[:220])
-          print('T2 file-batch:', json.dumps(call([{'a':'ach'},{'a':'pra','rs':{},'ph':fh},{'a':'g','v':2,'g':1,'ssl':1,'p':fh}]))[:220])
-          print('T3 folder-v2:', json.dumps(call([{'a':'g','v':2,'g':1,'ssl':1,'n':ff}], '&n=' + folder))[:220])
-          print('T4 folder-batch:', json.dumps(call([{'a':'ach'},{'a':'pra','rs':{},'ph':folder},{'a':'g','v':2,'g':1,'ssl':1,'n':ff}], '&n=' + folder))[:220])
-          print('T5 file-v2-noparams:', json.dumps(call([{'a':'g','v':2,'p':fh}]))[:220])
-          PYSRC
-          python3 /tmp/v2.py
+          DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1)
+          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megac.deb
+          sudo apt-get install -y -qq /tmp/megac.deb || true
+      - name: Belt2
+        if: ${{ inputs.mode == 'belt2' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LINK: ${{ inputs.link }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -uo pipefail
+          gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
+          mkdir -p /tmp/dl
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done.txt || true
+          echo "轮前资产: $(wc -l < /tmp/done.txt)"
+          python3 mega_api.py harvest "$LINK" 4700000000 /tmp/dl /tmp/done.txt 2>&1 | grep -vE "^GET " || true
+          echo "目录: $(du -sB1 /tmp/dl | cut -f1)"
+          find /tmp/dl -type f ! -name ".*" -printf "%s\t%p\n" | sort -rn > /tmp/all_files.tsv
+          echo "实际文件: $(wc -l < /tmp/all_files.tsv)"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done2.txt || true
+          UP=0; MISS=0
+          while IFS=$'\t' read -r h size asset name path sh ts; do
+            grep -q "^${asset}\.part-" /tmp/done2.txt && continue
+            F="/tmp/dl/$path/$name"
+            if [ ! -f "$F" ] || [ "$(stat -c%s "$F")" != "$size" ]; then
+              F=$(awk -F'\t' -v s="$size" '$1 == s {print $2; exit}' /tmp/all_files.tsv)
+            fi
+            if [ -n "$F" ] && [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
+              split -b 1900m -d "$F" "/tmp/${asset}.part-"
+              gh release upload "$TAG" /tmp/"${asset}".part-* --clobber >/dev/null 2>&1 && UP=$((UP+1)) || echo "UPLOAD_FAIL $name"
+              rm -f /tmp/"${asset}".part-* "$F"
+              grep -vF "$F" /tmp/all_files.tsv > /tmp/af.tmp 2>/dev/null && mv /tmp/af.tmp /tmp/all_files.tsv || true
+            else
+              MISS=$((MISS+1))
+            fi
+          done < mega_files.tsv
+          echo "BELT_RESULT uploaded=$UP missing=$MISS"

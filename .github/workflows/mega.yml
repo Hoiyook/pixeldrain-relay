@@ -34,27 +34,18 @@ jobs:
           TAG:   ${{ inputs.tag }}
           SHARD: ${{ inputs.shard }}
         run: |
-          mkdir -p /tmp/dl
-          if [ "$MODE" = "single-test" ]; then
-            echo "=== 按路径下载单个文件 ==="
-            mkdir -p /tmp/dl3
-            mega-get "${LINK}/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4" /tmp/dl3 2>&1 | tail -3 || true
-            find /tmp/dl3 -type f -exec ls -la {} \; 2>/dev/null | head -5
-            echo "=== 带引号路径测试(根目录文件) ==="
-            ls /tmp/dl2 2>/dev/null | head -5
-          elif [ "$MODE" = "megadl-test" ]; then
-            echo "=== A. megadl 匿名测试 (90秒后杀掉) ==="
-            timeout 90 megadl "$LINK" --path /tmp/dl 2>&1 | head -20 || true
-            echo "=== A. 下载结果 ==="
-            find /tmp/dl -type f -exec ls -la {} \; 2>/dev/null | head -8
-            du -sb /tmp/dl 2>/dev/null | awk '{print "A合计字节:", $1}'
-            echo "=== B. mega-get 匿名测试 (90秒后杀掉) ==="
-            mkdir -p /tmp/dl2
-            timeout 90 mega-get "$LINK" /tmp/dl2 2>&1 | head -10 || true
-            echo "=== B. 下载结果 ==="
-            find /tmp/dl2 -type f -exec ls -la {} \; 2>/dev/null | head -8
-            du -sb /tmp/dl2 2>/dev/null | awk '{print "B合计字节:", $1}'
-          elif [ "$MODE" = "get" ]; then
+          if [ "$MODE" = "dummy-test" ]; then
+            echo "=== 预置占位文件测试 ==="
+            mkdir -p "/tmp/dl/Old Youtube Videos/Youtube Shorts"
+            truncate -s 11009147 "/tmp/dl/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4"
+            echo "占位后:"; du -sb /tmp/dl
+            timeout 70 mega-get "$LINK" /tmp/dl 2>&1 | grep -vE "^TRANSFERRING" | head -12 || true
+            echo "=== 下载后状态 ==="
+            du -sb /tmp/dl
+            find /tmp/dl -type f | head -10
+            echo "=== 占位文件是否被改动 ==="
+            stat -c "%s %Y %n" "/tmp/dl/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4"
+          elif [ "$MODE" = "get" ]; then          elif [ "$MODE" = "get" ]; then
             set -euo pipefail
             echo "$ASSET" | grep -qE '^[A-Za-z0-9._()-]+$' || { echo "bad asset name"; exit 1; }
             gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true

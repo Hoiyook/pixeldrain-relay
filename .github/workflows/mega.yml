@@ -12,45 +12,26 @@ jobs:
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
-      - name: Install megacmd
-        run: |
-          DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1)
-          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megac.deb
-          sudo apt-get install -y -qq /tmp/megac.deb
-      - name: Login belt
-        if: ${{ inputs.mode == 'loginbelt' }}
+      - name: Single file relay
+        if: ${{ inputs.mode == 'single' }}
         env:
           GH_TOKEN: ${{ github.token }}
           LINK: ${{ inputs.link }}
           TAG: ${{ inputs.tag }}
-          MEGA_USER: ${{ secrets.MEGA_USER }}
-          MEGA_PASS: ${{ secrets.MEGA_PASS }}
         run: |
           set -uo pipefail
-          if [ -z "$MEGA_USER" ]; then echo "NO_CREDS"; exit 1; fi
-          mega-login "$MEGA_USER" "$MEGA_PASS" 2>&1 | grep -v Pass && echo "登录OK" || { echo "LOGIN_FAIL"; exit 1; }
-          mega-whoami | head -3
-          gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done2.txt || true
-          mkdir -p /tmp/dl
-          UP=0; MISS=0; QUIT=0
-          while IFS=$'\t' read -r h size asset name path sh ts; do
-            grep -q "^${asset}\.part-" /tmp/done2.txt && continue
-            if [ $QUIT = 1 ]; then MISS=$((MISS+1)); continue; fi
-            F="/tmp/dl/$path/$name"
-            mkdir -p "/tmp/dl/$path"
-            mega-get "${LINK}/${path}/${name}" "$F" > /tmp/g.log 2>&1
-            rc=$?
-            if [ $rc != 0 ] && grep -qi "quota" /tmp/g.log; then
-              echo "配额耗尽, 本轮结束"; QUIT=1; MISS=$((MISS+1)); continue
-            fi
-            if [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
-              split -b 1900m -d "$F" "/tmp/${asset}.part-"
-              gh release upload "$TAG" /tmp/"${asset}".part-* --clobber >/dev/null 2>&1 && UP=$((UP+1)) || echo "UPLOAD_FAIL $name"
-              rm -f /tmp/"${asset}".part-* "$F"
-            else
-              echo "MISS $name (rc=$rc)"
-              MISS=$((MISS+1))
-            fi
-          done < mega_files.tsv
-          echo "BELT_RESULT uploaded=$UP missing=$MISS"
+          gh release create "$TAG" --title "$TAG" --notes single 2>/dev/null || true
+          python3 mega_single.py "$LINK" -o /tmp/dl.bin | tee /tmp/single.log
+          grep -q DOWNLOAD_OK /tmp/single.log || { echo GET_FAILED; exit 1; }
+          actual=$(stat -c%s /tmp/dl.bin)
+          expect=$(grep '^SIZE ' /tmp/single.log | awk '{print $2}')
+          [ "$actual" = "$expect" ] || { echo SIZE_MISMATCH; exit 1; }
+          NAME=$(grep '^NAME ' /tmp/single.log | sed 's/^NAME //' | python3 -c "import sys,json;print(json.load(sys.stdin))")
+          SAFE=$(echo "$NAME" | tr -c 'A-Za-z0-9._()-' '_' | sed 's/_\+/_/g; s/^_//; s/_$//; s/$/.PREFIX/' | sed 's/\.PREFIX$//')
+          SAFE="${SAFE:0:80}"
+          echo "文件名: $NAME -> 资产: $SAFE"
+          split -b 1900m -d /tmp/dl.bin "/tmp/${SAFE}.part-"
+          rm -f /tmp/dl.bin
+          gh release upload "$TAG" /tmp/"${SAFE}".part-* --clobber
+          rm -f /tmp/"${SAFE}".part-*
+          echo "UPLOADED $SAFE ($actual bytes)"

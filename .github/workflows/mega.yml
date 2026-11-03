@@ -24,10 +24,14 @@ jobs:
         run: |
           mkdir -p /tmp/dlx
           timeout 75 mega-debug get "$LINK" /tmp/dlx > /tmp/dbg.log 2>&1 || true
-          echo "=== API 命令序列 ==="
-          grep -aoE "POST https://g.api.mega.co.nz/cs[^ ]*" /tmp/dbg.log | head -5
-          grep -aoE '"a":"[a-z]+"' /tmp/dbg.log | sort | uniq -c | sort -rn | head -15
-          echo "=== us/登录相关 ==="
-          grep -aiE "\\"a\\":\\"us|ephemeral|session|sid" /tmp/dbg.log | head -8
-          echo "=== g 命令上下文 ==="
-          grep -aB2 -A6 '"a":"g"' /tmp/dbg.log | head -40
+          wc -c /tmp/dbg.log
+          echo ----HEAD----
+          head -c 3000 /tmp/dbg.log
+          echo ----MARK----
+          grep -naEcs . /dev/null 2>/dev/null || true
+          grep -c a: /tmp/dbg.log || true
+          echo ----SAMPLE----
+          grep -an "cs?" /tmp/dbg.log | head -6
+          grep -an "\x27a\x27" /tmp/dbg.log | head -4
+          echo ----TAIL----
+          tail -c 2500 /tmp/dbg.log

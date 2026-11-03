@@ -11,18 +11,46 @@ on:
       shard: {required: false, type: string, default: ''}
 jobs:
   run:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 110
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
-      - name: Browser probe
-        if: ${{ inputs.mode == 'browser' }}
+      - name: Install megadl
         run: |
-          pip install --quiet playwright pycryptodome
-          python3 -m playwright install chromium --with-deps >/dev/null 2>&1 || python3 -m playwright install chromium
-          python3 browser_probe.py "${{ inputs.link }}"
+          DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megasync_[^"]*_amd64\.deb' | head -1)
+          echo "deb: $DEB"
+          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megasync.deb
+          sudo apt-get install -y -qq /tmp/megasync.deb >/dev/null 2>&1 || sudo apt-get install -f -y -qq /tmp/megasync.deb
+          which megadl || dpkg -L megasync | grep bin
       - name: Run
-        if: ${{ inputs.mode != 'browser' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE:  ${{ inputs.mode }}
+          LINK:  ${{ inputs.link }}
+          ASSET: ${{ inputs.asset }}
+          TAG:   ${{ inputs.tag }}
+          SHARD: ${{ inputs.shard }}
         run: |
-          echo "mode=$MODE"
+          mkdir -p /tmp/dl
+          if [ "$MODE" = "megadl-test" ]; then
+            echo "=== megadl 匿名测试 (90秒后杀掉) ==="
+            timeout 90 megadl "$LINK" --path /tmp/dl 2>&1 | head -20 || true
+            echo "=== 下载结果 ==="
+            find /tmp/dl -type f -exec ls -la {} \; | head -10
+            du -sb /tmp/dl | awk '{print "合计字节:", $1}'
+          elif [ "$MODE" = "get" ]; then
+            set -euo pipefail
+            echo "$ASSET" | grep -qE '^[A-Za-z0-9._()-]+$' || { echo "bad asset name"; exit 1; }
+            gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
+            timeout 3000 megadl "$LINK" --path /tmp/dl 2>&1 | tail -3 || true
+            TMP="/tmp/dl/${{ inputs.finalname }}"
+            [ -f "$TMP" ] || { echo "FILE_MISSING $TMP"; find /tmp/dl -type f | head -5; exit 1; }
+            actual=$(stat -c%s "$TMP")
+            echo "DOWNLOADED $ASSET $actual bytes"
+            split -b 1900m -d "$TMP" "/tmp/${ASSET}.part-"
+            rm -f "$TMP"
+            gh release upload "$TAG" /tmp/"${ASSET}".part-* --clobber
+            rm -f /tmp/"${ASSET}".part-*
+            echo "UPLOADED $ASSET"
+          fi

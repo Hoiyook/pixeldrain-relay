@@ -64,11 +64,12 @@ def main():
         raise SystemExit(f'unexpected key length: {len(fk)}')
     sid = random.randint(0, 2 ** 31)
     api = f'https://g.api.mega.co.nz/cs?id={sid}'
-    req = urllib.request.Request(api, data=json.dumps([{'a': 'g', 'p': handle}]).encode(),
+    req = urllib.request.Request(api, data=json.dumps([{'a': 'g', 'v': 2, 'g': 1, 'ssl': 1, 'p': handle}]).encode(),
                                  headers={'Content-Type': 'text/plain;charset=UTF-8', 'Referer': 'https://mega.nz/', 'Origin': 'https://mega.nz', **UA})
     r = json.loads(urllib.request.urlopen(req, timeout=60).read().decode())[0]
     if not (isinstance(r, dict) and r.get('g')):
         raise SystemExit(f'g failed: {json.dumps(r)[:200]}')
+    gurl = r['g'][0] if isinstance(r['g'], list) else r['g']
     size = int(r['s'])
     name = ''
     try:
@@ -80,7 +81,6 @@ def main():
         pass
     print(f'NAME {json.dumps(name, ensure_ascii=True)}')
     print(f'SIZE {size}')
-    gurl = r['g']
     tries = 0
     while tries < 6:
         tries += 1

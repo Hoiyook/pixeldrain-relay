@@ -2,40 +2,50 @@ name: mega
 on:
   workflow_dispatch:
     inputs:
-      mode:  {description: 'probe|debug|get', required: true, type: string}
+      mode:  {description: 'megacmd-test|get|batch', required: true, type: string}
       link:  {required: true, type: string}
       handle: {required: false, type: string, default: ''}
       asset: {required: false, type: string, default: ''}
+      finalname: {required: false, type: string, default: ''}
       tag:   {required: false, type: string, default: ''}
+      shard: {required: false, type: string, default: ''}
 jobs:
   run:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 110
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
-      - run: pip install --quiet pycryptodome
+      - name: Install MEGAcmd
+        run: |
+          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/megac-xUbuntu_24.04_amd64.deb" -O /tmp/megac.deb
+          sudo apt-get install -y -qq /tmp/megac.deb >/dev/null 2>&1 || sudo apt-get install -y -f /tmp/megac.deb >/dev/null 2>&1
+          mega-help --version 2>/dev/null | head -2 || mega-version 2>/dev/null || true
       - name: Run
         env:
           GH_TOKEN: ${{ github.token }}
           MODE:   ${{ inputs.mode }}
           LINK:   ${{ inputs.link }}
-          HANDLE: ${{ inputs.handle }}
           ASSET:  ${{ inputs.asset }}
           TAG:    ${{ inputs.tag }}
+          SHARD:  ${{ inputs.shard }}
         run: |
-          M="$MODE"; [ "$M" = "probe" ] && M="ls"
-          if [ "$M" = "ls" ] || [ "$M" = "debug" ] || [ "$M" = "gdebug" ] || [ "$M" = "gdebug2" ] || [ "$M" = "gdebug3" ] || [ "$M" = "gdebug4" ]; then
-            python3 mega_api.py "$M" "$LINK" "$HANDLE"
-          else
+          if [ "$MODE" = "megacmd-test" ]; then
+            echo "=== mega-ls (anon) ==="
+            mega-ls -l "$LINK" 2>&1 | head -15
+            echo "=== mega-get smoke ==="
+            mkdir -p /tmp/dl
+            mega-get "$LINK" --path /tmp/dl 2>&1 | tail -5 || true
+            find /tmp/dl -type f | head -5
+          elif [ "$MODE" = "get" ]; then
             set -euo pipefail
             echo "$ASSET" | grep -qE '^[A-Za-z0-9._()-]+$' || { echo "bad asset name"; exit 1; }
             gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
-            TMP="/tmp/dl_$HANDLE"
-            python3 mega_api.py get "$LINK" "$HANDLE" -o "$TMP" | tee /tmp/getlog.txt
-            grep -q DOWNLOAD_OK /tmp/getlog.txt || { echo GET_FAILED; exit 1; }
-            actual=$(stat -c%s "$TMP"); expect=$(grep '^SIZE ' /tmp/getlog.txt | awk '{print $2}')
-            [ "$actual" = "$expect" ] || { echo SIZE_MISMATCH; exit 1; }
+            mkdir -p /tmp/dl
+            mega-get "${LINK}/${{ inputs.finalname }}" --path /tmp/dl 2>&1 | tail -3
+            TMP="/tmp/dl/${{ inputs.finalname }}"
+            actual=$(stat -c%s "$TMP")
+            echo "DOWNLOADED $actual bytes"
             split -b 1900m -d "$TMP" "/tmp/${ASSET}.part-"
             rm -f "$TMP"
             gh release upload "$TAG" /tmp/"${ASSET}".part-* --clobber

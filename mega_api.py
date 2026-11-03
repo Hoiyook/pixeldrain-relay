@@ -259,6 +259,22 @@ def main():
                 continue
             r = m.api(seq)
             print(seq[0].get('p', seq[0].get('n')), seq[0].get('a'), '->', repr(r)[:300])
+    elif mode == 'gdebug5':
+        h = sys.argv[3]
+        n = m.by_handle(h)
+        fk = n['key']
+        k16 = xor16(fk[:16], fk[16:])
+        b64e = lambda b: base64.b64encode(b).decode().replace('+', '-').replace('/', '_').rstrip('=')
+        link = f'https://mega.nz/file/{h}#{b64e(k16)}'
+        print('LINK', link)
+        for seq, label, extra in (([{'a': 'g', 'p': h}], 'p(h) bare-url', ''),
+                                  ([{'a': 'g', 'p': h, 'v': 1}], 'p(h,v1) bare-url', ''),
+                                  ([{'a': 'g', 'p': h, 'v': 1}], 'p(h,v1) with-n', 'n')):
+            r = m.api(seq, n=extra)
+            print(label, '->', repr(r)[:200])
+            if isinstance(r, dict) and r.get('g'):
+                print('URL FOUND', r['g'][:80], 'size', r.get('s'))
+                break
     elif mode == 'gdebug4':
         h = sys.argv[3]
         r = m.api([{'a': 'g', 'n': h}])

@@ -283,7 +283,9 @@ def main():
                         print('  SEG fail:', seg[:60], e)
     elif mode == 'ls':
         for f in m.ls():
-            print(json.dumps({k: f[k] for k in ('h', 'path', 'name', 'size', 'ts')}, ensure_ascii=True))
+            import base64 as _b
+            kb = _b.b64encode(f['key']).decode() if f.get('key') else ''
+            print(json.dumps({'h': f['h'], 'path': f['path'], 'name': f['name'], 'size': f['size'], 'ts': f.get('ts', 0), 'key': kb}, ensure_ascii=True))
     elif mode == 'gdebug':
         h = sys.argv[3]
         r = m.api([{'a': 'l', 'n': h}])

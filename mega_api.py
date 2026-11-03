@@ -217,12 +217,18 @@ def main():
         done = set()
         if os.path.exists(donef):
             done = set(x.strip() for x in open(donef) if x.strip())
-        got = 0
+        rows = []
         for line in open('mega_files.tsv'):
             parts = line.rstrip('\n').split('\t')
             h, size, asset, name, path = parts[0], int(parts[1]), parts[2], parts[3], parts[4]
             if asset in done:
                 continue
+            rows.append((size, h, asset, name, path))
+        rows.sort(key=lambda r: r[0])
+        print(f'待收: {len(rows)} 个 (小文件优先)')
+        got = 0
+        fails = 0
+        for size, h, asset, name, path in rows:
             n = nm.get(h)
             if not n or not n['key']:
                 print(f'SKIP_NOKEY {asset}')
@@ -232,14 +238,23 @@ def main():
             if got >= budget:
                 print(f'BUDGET_STOP at {asset}')
                 break
+            if fails >= 3:
+                print('FAIL_LIMIT_STOP')
+                break
             print(f'GET {asset} ({size} bytes)', flush=True)
             try:
                 m.download(h, outp, want_mac=False)
                 got += size
+                fails = 0
                 print(f'GOT {asset} {size}', flush=True)
             except SystemExit as e:
+                fails += 1
                 print(f'FAIL {asset}: {e}', flush=True)
-                break
+                try:
+                    os.remove(outp)
+                except OSError:
+                    pass
+                continue
         print(f'HARVEST_DONE bytes_this_round={got}')
     elif mode == 'debug':
         r = m.api([{'a': 'f', 'c': 1, 'r': 1}])

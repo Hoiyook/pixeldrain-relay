@@ -4,11 +4,8 @@ on:
     inputs:
       mode:  {required: true, type: string}
       link:  {required: true, type: string}
-      handle: {required: false, type: string, default: ''}
-      asset: {required: false, type: string, default: ''}
-      finalname: {required: false, type: string, default: ''}
-      tag:   {required: false, type: string, default: ''}
       shard: {required: false, type: string, default: ''}
+      tag:   {required: false, type: string, default: ''}
 jobs:
   run:
     runs-on: ubuntu-24.04
@@ -16,47 +13,72 @@ jobs:
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
-      - name: Install megadl
+      - name: Install megacmd
         run: |
-          DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megasync_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1)
-          echo "deb: $DEB"
-          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megasync.deb || true
-          if [ ! -s /tmp/megasync.deb ]; then echo "megasync deb 下载失败, 回退 megacmd"; fi
-          sudo apt-get install -y -qq /tmp/megasync.deb >/dev/null 2>&1 || sudo apt-get install -f -y -qq /tmp/megasync.deb || true
-          which megadl || { echo "无 megadl, 装 megacmd"; MDEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1); wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$MDEB" -O /tmp/megac.deb; sudo apt-get install -y -qq /tmp/megac.deb; }
-          echo "megadl: $(which megadl || echo none), mega-get: $(which mega-get || echo none)"
-      - name: Run
+          DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1)
+          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megac.deb
+          sudo apt-get install -y -qq /tmp/megac.deb
+      - name: Dummy test
+        if: ${{ inputs.mode == 'dummy-test' }}
+        run: |
+          mkdir -p "/tmp/dl/Old Youtube Videos/Youtube Shorts"
+          truncate -s 11009147 "/tmp/dl/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4"
+          echo "占位后: $(du -sb /tmp/dl | cut -f1) 字节(表观)"
+          timeout 70 mega-get "$LINK" /tmp/dl 2>&1 | grep -vE "^TRANSFERRING|^Setup|^_|^\s*$" | head -15 || true
+          echo "=== 下载后总表观字节 ==="
+          du -sb /tmp/dl | cut -f1
+          echo "=== 实际文件列表 ==="
+          find /tmp/dl -type f -printf "%s %p\n" | head -12
+          echo "=== 占位文件状态(大小/修改时间) ==="
+          stat -c "%s %Y %n" "/tmp/dl/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4"
+      - name: Shard relay
+        if: ${{ inputs.mode == 'shard' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          MODE:  ${{ inputs.mode }}
-          LINK:  ${{ inputs.link }}
-          ASSET: ${{ inputs.asset }}
-          TAG:   ${{ inputs.tag }}
+          LINK: ${{ inputs.link }}
           SHARD: ${{ inputs.shard }}
+          TAG: ${{ inputs.tag }}
         run: |
-          if [ "$MODE" = "dummy-test" ]; then
-            echo "=== 预置占位文件测试 ==="
-            mkdir -p "/tmp/dl/Old Youtube Videos/Youtube Shorts"
-            truncate -s 11009147 "/tmp/dl/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4"
-            echo "占位后:"; du -sb /tmp/dl
-            timeout 70 mega-get "$LINK" /tmp/dl 2>&1 | grep -vE "^TRANSFERRING" | head -12 || true
-            echo "=== 下载后状态 ==="
-            du -sb /tmp/dl
-            find /tmp/dl -type f | head -10
-            echo "=== 占位文件是否被改动 ==="
-            stat -c "%s %Y %n" "/tmp/dl/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4"
-          elif [ "$MODE" = "get" ]; then          elif [ "$MODE" = "get" ]; then
-            set -euo pipefail
-            echo "$ASSET" | grep -qE '^[A-Za-z0-9._()-]+$' || { echo "bad asset name"; exit 1; }
-            gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
-            timeout 3000 megadl "$LINK" --path /tmp/dl 2>&1 | tail -3 || true
-            TMP="/tmp/dl/${{ inputs.finalname }}"
-            [ -f "$TMP" ] || { echo "FILE_MISSING $TMP"; find /tmp/dl -type f | head -5; exit 1; }
-            actual=$(stat -c%s "$TMP")
-            echo "DOWNLOADED $ASSET $actual bytes"
-            split -b 1900m -d "$TMP" "/tmp/${ASSET}.part-"
-            rm -f "$TMP"
-            gh release upload "$TAG" /tmp/"${ASSET}".part-* --clobber
-            rm -f /tmp/"${ASSET}".part-*
-            echo "UPLOADED $ASSET"
-          fi
+          set -uo pipefail
+          gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
+          # 生成占位: 非本分片的所有文件
+          mkdir -p /tmp/dl
+          awk -F'\t' -v s="$SHARD" '$6 != s {print $2"\t"$4"\t"$5}' mega_files.tsv | while IFS=$'\t' read -r size name path; do
+            mkdir -p "/tmp/dl/$path"
+            truncate -s "$size" "/tmp/dl/$path/$name"
+          done
+          echo "占位完成, 后台启动 mega-get"
+          mega-get "$LINK" /tmp/dl > /tmp/mega_get.log 2>&1 &
+          MGPID=$!
+          # 等待本分片所有文件就绪(精确大小) 或 50 分钟超时
+          START=$(date +%s)
+          while true; do
+            TODO=0
+            while IFS=$'\t' read -r h size name path sh; do
+              [ "$sh" = "$SHARD" ] || continue
+              [ -f "/tmp/dl/$path/$name" ] || TODO=1
+            done < mega_files.tsv
+            [ "$TODO" = 0 ] && break
+            NOW=$(date +%s)
+            [ $((NOW - START)) -gt 3000 ] && break
+            sleep 15
+          done
+          kill $MGPID 2>/dev/null || true
+          sleep 3
+          echo "=== 上传本分片完成的文件 ==="
+          MISS=0; DONE=0
+          while IFS=$'\t' read -r h size name path sh; do
+            [ "$sh" = "$SHARD" ] || continue
+            F="/tmp/dl/$path/$name"
+            if [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
+              SAFE=$(echo "$name" | tr -c 'A-Za-z0-9._()-' '_' | cut -c1-90)
+              split -b 1900m -d "$F" "/tmp/${SAFE}.part-"
+              gh release upload "$TAG" /tmp/"${SAFE}".part-* --clobber && DONE=$((DONE+1)) || echo "UPLOAD_FAIL $name"
+              rm -f /tmp/"${SAFE}".part-* "$F"
+            else
+              echo "MISSING $name"
+              MISS=$((MISS+1))
+            fi
+          done < mega_files.tsv
+          echo "SHARD $SHARD 完成=$DONE 缺失=$MISS"
+          [ "$MISS" = 0 ] || exit 1

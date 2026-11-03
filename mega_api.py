@@ -259,6 +259,24 @@ def main():
                 continue
             r = m.api(seq)
             print(seq[0].get('p', seq[0].get('n')), seq[0].get('a'), '->', repr(r)[:300])
+    elif mode == 'gdebug6':
+        h = sys.argv[3]
+        variants = [
+            ([{'a': 'g', 'p': h, 'ad': 1}], ''),
+            ([{'a': 'g', 'p': h, 'ad': 1}], 'n'),
+            ([{'a': 'g', 'p': h, 'v': 1, 'ssl': 1, 'g': 1}], ''),
+            ([{'a': 'g', 'n': h, 'pt': 1, 'g': 1, 'ssl': 1}], 'n'),
+            ([{'a': 'g', 'n': h, 'v': 3}], 'n'),
+        ]
+        for seq, extra in variants:
+            try:
+                r = m.api(seq, n=extra)
+            except SystemExit as e:
+                r = f'SystemExit: {e}'
+            print(seq[0].get('p') and 'p-mode' or 'n-mode', sorted(seq[0].keys()), extra or 'bare-url', '->', repr(r)[:220])
+            if isinstance(r, dict) and r.get('g'):
+                print('URL FOUND', r['g'][:90])
+                break
     elif mode == 'gdebug5':
         h = sys.argv[3]
         n = m.by_handle(h)

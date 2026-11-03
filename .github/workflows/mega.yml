@@ -19,6 +19,7 @@ jobs:
           LINK: ${{ inputs.link }}
           TAG: ${{ inputs.tag }}
         run: |
+          pip install --quiet pycryptodome 2>/dev/null || pip install --quiet --break-system-packages pycryptodome || true
           set -uo pipefail
           gh release create "$TAG" --title "$TAG" --notes single 2>/dev/null || true
           python3 mega_single.py "$LINK" -o /tmp/dl.bin | tee /tmp/single.log

@@ -45,10 +45,15 @@ jobs:
           gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
           # 生成占位: 非本分片的所有文件
           mkdir -p /tmp/dl
-          awk -F'\t' -v s="$SHARD" '$6 != s {print $2"\t"$4"\t"$5}' mega_files.tsv | while IFS=$'\t' read -r size name path; do
-            mkdir -p "/tmp/dl/$path"
-            truncate -s "$size" "/tmp/dl/$path/$name"
-          done
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done_assets.txt 2>/dev/null || true
+          awk -F'\t' -v s="$SHARD" '{done=(index(FILENUM,"")==0)}1' /dev/null 2>/dev/null || true
+          while IFS=$'\t' read -r h size asset name path sh; do
+            if [ "$sh" != "$SHARD" ] || grep -q "^${asset}\.part-" /tmp/done_assets.txt 2>/dev/null; then
+              mkdir -p "/tmp/dl/$path"
+              truncate -s "$size" "/tmp/dl/$path/$name"
+            fi
+          done < mega_files.tsv
+          touch /tmp/dl_start_marker
           echo "占位完成, 启动 mega-get (进度直出)"
           stdbuf -oL mega-get "$LINK" /tmp/dl 2>&1 | stdbuf -oL grep -vE "^TRANSFERRING\s*\|+\|" &
           MGPID=$!
@@ -63,7 +68,15 @@ jobs:
             [ "$TODO" = 0 ] && break
             NOW=$(date +%s)
             DLREAL=$(du -sB1 /tmp/dl 2>/dev/null | cut -f1)
-            echo "[t=$((NOW - START))s] 实际下载字节: $DLREAL, mega-get存活: $(kill -0 $MGPID 2>/dev/null && echo yes || echo DEAD)"
+            echo "[t=$((NOW - START))s] 实际下载字节: $DLREAL, 存活: $(kill -0 $MGPID 2>/dev/null && echo yes || echo DEAD)"
+            find /tmp/dl -type f -newer /tmp/dl_start_marker -printf "%s %p\n" 2>/dev/null | sort -rn | head -4
+            if [ "$DLREAL" = "${LAST:-x}" ]; then
+              FROZEN=$((FROZEN + 1))
+              [ $FROZEN -ge 3 ] && { echo "下载冻结, 中止"; kill $MGPID 2>/dev/null; break; }
+            else
+              FROZEN=0
+            fi
+            LAST=$DLREAL
             [ $((NOW - START)) -gt 3000 ] && break
             kill -0 $MGPID 2>/dev/null || { echo "mega-get 已退出"; sleep 3; break; }
             sleep 15

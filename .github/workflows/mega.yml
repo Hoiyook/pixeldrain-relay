@@ -18,8 +18,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install MEGAcmd
         run: |
-          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/megac-xUbuntu_24.04_amd64.deb" -O /tmp/megac.deb
+          DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[^"]*_amd64\.deb' | head -1)
+          echo "deb: $DEB"
+          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megac.deb
           sudo apt-get install -y -qq /tmp/megac.deb >/dev/null 2>&1 || sudo apt-get install -y -f /tmp/megac.deb >/dev/null 2>&1
+          mega-version 2>/dev/null || true
           mega-help --version 2>/dev/null | head -2 || mega-version 2>/dev/null || true
       - name: Run
         env:

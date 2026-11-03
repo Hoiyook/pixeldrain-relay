@@ -17,60 +17,17 @@ jobs:
           DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1)
           wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megac.deb
           sudo apt-get install -y -qq /tmp/megac.deb
-      - name: Fish
-        if: ${{ inputs.mode == 'belt' }}
+      - name: Debug probe
+        if: ${{ inputs.mode == 'debugprobe' }}
         env:
-          GH_TOKEN: ${{ github.token }}
           LINK: ${{ inputs.link }}
-          TAG: ${{ inputs.tag }}
         run: |
-          set -uo pipefail
-          gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
-          mkdir -p /tmp/dl
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done_before.txt || true
-          echo "轮前资产: $(wc -l < /tmp/done_before.txt)"
-          stdbuf -oL mega-get "$LINK" /tmp/dl > /tmp/mg.log 2>&1 &
-          MGPID=$!
-          START=$(date +%s); LAST=""; FROZEN=0
-          while kill -0 $MGPID 2>/dev/null; do
-            sleep 30
-            NOW=$(date +%s)
-            DL=$(du -sB1 /tmp/dl 2>/dev/null | cut -f1)
-            Q=$(grep -ci "quota" /tmp/mg.log 2>/dev/null || echo 0)
-            echo "[t=$((NOW - START))s] 目录: $DL, 配额报错: $Q"
-            if [ "$DL" = "$LAST" ]; then
-              FROZEN=$((FROZEN+1))
-              if [ $FROZEN -ge 4 ]; then echo "冻结中止"; kill $MGPID 2>/dev/null; break; fi
-            else
-              FROZEN=0
-            fi
-            LAST=$DL
-            if [ $((NOW - START)) -gt 1200 ]; then echo "20分钟中止"; kill $MGPID 2>/dev/null; break; fi
-          done
-          sleep 3
-          echo "下载结束, 目录: $(du -sB1 /tmp/dl | cut -f1)"
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done2.txt || true
-          find /tmp/dl -type f -printf "%s\t%p\n" | sort -rn > /tmp/all_files.tsv
-          echo "诊断: all_files 行数=$(wc -l < /tmp/all_files.tsv), 前3:"
-          head -3 /tmp/all_files.tsv
-          UP=0; MISS=0; DBG=0
-          while IFS=$'\t' read -r h size asset name path sh; do
-            grep -q "^${asset}\.part-" /tmp/done2.txt && continue
-            F="/tmp/dl/$path/$name"
-            if [ ! -f "$F" ] || [ "$(stat -c%s "$F")" != "$size" ]; then
-              F=$(awk -F'\t' -v s="$size" '$1 == s {print $2; exit}' /tmp/all_files.tsv)
-            fi
-            if [ -n "$F" ] && [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
-              split -b 1900m -d "$F" "/tmp/${asset}.part-"
-              gh release upload "$TAG" /tmp/"${asset}".part-* --clobber >/dev/null 2>&1 && UP=$((UP+1)) || echo "UPLOAD_FAIL $name"
-              rm -f /tmp/"${asset}".part-* "$F"
-              grep -vF "$F" /tmp/all_files.tsv > /tmp/af.tmp 2>/dev/null && mv /tmp/af.tmp /tmp/all_files.tsv || true
-            else
-              MISS=$((MISS+1))
-              if [ $DBG -lt 4 ]; then
-                DBG=$((DBG+1))
-                echo "MISS样例: $name | 期望: /tmp/dl/$path/$name 存在=$([ -f "/tmp/dl/$path/$name" ] && echo Y || echo N) | 尺寸索引命中: $(grep -c "^$size\t" /tmp/all_files.tsv 2>/dev/null)"
-              fi
-            fi
-          done < mega_files.tsv
-          echo "BELT_RESULT uploaded=$UP missing=$MISS"
+          echo "=== 包内二进制 ==="
+          dpkg -L megacmd | grep -E "bin|debug" | head -10
+          echo "=== mega-debug 存在? ==="
+          which mega-debug && echo FOUND || echo "no mega-debug"
+          echo "=== MEGACMD 日志级别测试 ==="
+          timeout 45 mega-get "$LINK" /tmp/dl9 2>&1 | tail -2 || true
+          echo "=== megacmdserver.log 中的 API 痕迹 ==="
+          grep -aoE "\{\"a\\":[a-z0-9]+" /home/runner/.megaCmd/megacmdserver.log 2>/dev/null | sort | uniq -c | head -20
+          grep -aiE "g.*url|request|cmd" /home/runner/.megaCmd/megacmdserver.log 2>/dev/null | head -10

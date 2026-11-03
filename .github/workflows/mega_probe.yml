@@ -1,0 +1,30 @@
+name: mega_probe
+on:
+  workflow_dispatch:
+    inputs:
+      link: {description: 'mega folder link', required: true, type: string}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: List folder
+        run: |
+          set -x
+          sudo apt-get update -qq >/dev/null 2>&1
+          sudo apt-get install -y -qq megatools >/dev/null 2>&1 || true
+          LINK="${{ inputs.link }}"
+          if command -v megatools >/dev/null 2>&1; then
+            echo "=== megatools ls -l ==="
+            timeout 60 megatools ls -l "$LINK" > /tmp/ls.txt 2>/tmp/ls.err || true
+            cat /tmp/ls.txt
+            echo "--- stderr ---"
+            head -5 /tmp/ls.err
+          fi
+          if [ ! -s /tmp/ls.txt ]; then
+            echo "=== fallback: MEGAcmd ==="
+            . /etc/os-release
+            wget -q "https://mega.nz/linux/repo/xUbuntu_${VERSION_ID}/amd64/megac-xUbuntu_${VERSION_ID}_amd64.deb" -O /tmp/megac.deb
+            sudo apt-get install -y -qq /tmp/megac.deb >/dev/null 2>&1
+            timeout 60 mega-ls -l -r "$LINK" 2>&1 || true
+          fi

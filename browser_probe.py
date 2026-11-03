@@ -31,34 +31,51 @@ with sync_playwright() as p:
         })
 
     page.on('response', on_response)
+
+    ws_frames = []
+
+    def on_ws(ws):
+        print('WS OPEN:', ws.url[:100])
+        ws.on('framereceived', lambda f: ws_frames.append(('recv', str(f)[:500])))
+        ws.on('framesent', lambda f: ws_frames.append(('sent', str(f)[:500])))
+
+    page.on('websocket', on_ws)
+
     page.goto(LINK, wait_until='domcontentloaded', timeout=90000)
     page.wait_for_timeout(20000)
     print('TITLE:', page.title())
+    print('=== WS frames (load) ===')
+    for i, (d, f) in enumerate(ws_frames[:20]):
+        print(f'WS{i} {d}:', f[:400])
+
+    print('=== page markup probe ===')
+    print(page.evaluate("""JSON.stringify({
+        rows: [...document.querySelectorAll('[class*=file], [class*=grid], [class*=node]')]
+            .filter(e => e.textContent && e.textContent.includes('.mp4') && e.children.length)
+            .slice(0, 3).map(e => ({cls: e.className.slice(0, 80), txt: e.textContent.trim().slice(0, 60)}))
+    })""")[:800])
+
+    print('=== trigger download via UI ===')
+    before_ws = len(ws_frames)
+    before = len(calls)
     try:
-        print('SERVICE WORKERS:', [w.url for w in ctx.service_workers])
+        row = page.locator('text=Anby She Wolf (Sakura G).mp4').first
+        row.click(button='right', timeout=8000)
+        page.wait_for_timeout(3000)
+        print('context menu items:', page.evaluate(
+            "JSON.stringify([...document.querySelectorAll('[class*=menu] [class*=item], .dropdown-item, [role=menuitem]')]"
+            ".map(e => e.textContent.trim().slice(0, 30)).filter(Boolean).slice(0, 12))"))
+        dl = page.locator('text=Download').last
+        dl.click(timeout=5000)
+        page.wait_for_timeout(10000)
+        print('clicked Download')
     except Exception as e:
-        print('sw check failed:', str(e)[:100])
-    print('=== API calls on load ===')
-    for i, c in enumerate(calls):
-        print(f"CALL{i}", json.dumps(c, ensure_ascii=False)[:900])
+        print('ui download failed:', str(e)[:200])
 
-    print('=== global objects ===')
-    print(page.evaluate("JSON.stringify({api_req: typeof api_req, api: typeof api, M: typeof M, "
-                        "MegaApi: typeof MegaApi, megajs: typeof megajs, uapi: typeof uapi})"))
-    for expr in (
-        "api_req({a:'g', n:'hGghhQaZ'})",
-        "api.req({a:'g', n:'hGghhQaZ'})",
-        "M.api.req({a:'g', n:'hGghhQaZ'})",
-    ):
-        try:
-            res = page.evaluate(f"{expr}.then(r => JSON.stringify(r).slice(0, 400)).catch(e => 'ERR ' + String(e).slice(0, 150))")
-            print(f"EVAL {expr} -> {res}")
-            if res and 'ERR' not in str(res[:6]):
-                break
-        except Exception as e:
-            print(f"EVAL {expr} EXC {str(e)[:120]}")
-
-    print('=== API calls after eval ===')
-    for i, c in enumerate(calls):
-        print(f"POSTCALL{i}", json.dumps(c, ensure_ascii=False)[:900])
+    print('=== WS frames after download ===')
+    for i, (d, f) in enumerate(ws_frames[before_ws:before_ws + 15]):
+        print(f'WSD{i} {d}:', f[:450])
+    print('=== API calls after download ===')
+    for i, c in enumerate(calls[before:before + 10]):
+        print(f"DLCALL{i}", json.dumps(c, ensure_ascii=False)[:900])
     b.close()

@@ -1,81 +1,60 @@
-"""Browser probe: capture real webclient API calls on a MEGA folder page."""
-import json, re, sys
+"""Probe v4: CDP network capture incl. service workers, + real download click."""
+import json, sys, time
 from playwright.sync_api import sync_playwright
 
 LINK = sys.argv[1]
-calls = []
+events = []
 
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, args=['--no-sandbox'])
-    ctx = b.new_context(locale='en-US')
+    ctx = b.new_context(accept_downloads=True, locale='en-US')
     page = ctx.new_page()
 
-    def on_response(r):
-        u = r.url
-        if 'api.mega.co.nz' not in u:
-            return
-        try:
-            body = r.json()
-        except Exception:
-            try:
-                body = r.text()[:300]
-            except Exception:
-                body = '?'
-        calls.append({
-            'url': u,
-            'status': r.status,
-            'post': (r.request.post_data or '')[:400],
-            'resp': json.dumps(body)[:600] if not isinstance(body, str) else body,
-            'hdrs': {k: v for k, v in r.request.headers.items()
-                     if k.lower() in ('origin', 'referer', 'content-type', 'x-requested-with')},
-        })
+    cdp = ctx.new_cdp_session(page)
+    cdp.send('Network.enable')
+    def on_req(params):
+        u = params.get('request', {}).get('url', '')
+        if 'api.mega.co.nz' in u:
+            events.append(('REQ', u[:110], params['request'].get('postData', '')[:400],
+                           {k: v for k, v in params['request'].get('headers', {}).items()
+                            if k.lower() in ('origin', 'referer', 'content-type')}))
+    def on_resp(params):
+        u = params.get('response', {}).get('url', '')
+        if 'api.mega.co.nz' in u:
+            events.append(('RESP', u[:110], params.get('response', {}).get('status', 0), ''))
+    cdp.on('Network.requestWillBeSent', on_req)
+    cdp.on('Network.responseReceived', on_resp)
 
-    page.on('response', on_response)
-
-    ws_frames = []
-
-    def on_ws(ws):
-        print('WS OPEN:', ws.url[:100])
-        ws.on('framereceived', lambda f: ws_frames.append(('recv', str(f)[:500])))
-        ws.on('framesent', lambda f: ws_frames.append(('sent', str(f)[:500])))
-
-    page.on('websocket', on_ws)
+    def dump(tag):
+        print(f'=== {tag} ===')
+        for i, e in enumerate(events):
+            print(f'{tag}{i}', json.dumps(e, ensure_ascii=False)[:800])
 
     page.goto(LINK, wait_until='domcontentloaded', timeout=90000)
-    page.wait_for_timeout(20000)
+    page.wait_for_timeout(15000)
     print('TITLE:', page.title())
-    print('=== WS frames (load) ===')
-    for i, (d, f) in enumerate(ws_frames[:20]):
-        print(f'WS{i} {d}:', f[:400])
+    dump('LOAD')
 
-    print('=== page markup probe ===')
-    print(page.evaluate("""JSON.stringify({
-        rows: [...document.querySelectorAll('[class*=file], [class*=grid], [class*=node]')]
-            .filter(e => e.textContent && e.textContent.includes('.mp4') && e.children.length)
-            .slice(0, 3).map(e => ({cls: e.className.slice(0, 80), txt: e.textContent.trim().slice(0, 60)}))
-    })""")[:800])
+    before = len(events)
+    # 尝试点击下载按钮 (file 页有巨大 Download 按钮)
+    for sel in ('button.download', '.download-button', '[id*=dlbut]', '.mega-button',
+                'text=Download', '[class*=download]'):
+        try:
+            page.locator(sel).first.click(timeout=4000)
+            print('clicked:', sel)
+            break
+        except Exception:
+            continue
+    page.wait_for_timeout(12000)
+    dump('AFTERCLICK')
 
-    print('=== trigger download via UI ===')
-    before_ws = len(ws_frames)
-    before = len(calls)
+    # 等待可能的浏览器下载
     try:
-        row = page.locator('text=Anby She Wolf (Sakura G).mp4').first
-        row.click(button='right', timeout=8000)
-        page.wait_for_timeout(3000)
-        print('context menu items:', page.evaluate(
-            "JSON.stringify([...document.querySelectorAll('[class*=menu] [class*=item], .dropdown-item, [role=menuitem]')]"
-            ".map(e => e.textContent.trim().slice(0, 30)).filter(Boolean).slice(0, 12))"))
-        dl = page.locator('text=Download').last
-        dl.click(timeout=5000)
-        page.wait_for_timeout(10000)
-        print('clicked Download')
+        with page.expect_download(timeout=15000) as dl:
+            pass
+        d = dl.value
+        print('DOWNLOAD EVENT:', d.suggested_filename, d.url[:150])
     except Exception as e:
-        print('ui download failed:', str(e)[:200])
-
-    print('=== WS frames after download ===')
-    for i, (d, f) in enumerate(ws_frames[before_ws:before_ws + 15]):
-        print(f'WSD{i} {d}:', f[:450])
-    print('=== API calls after download ===')
-    for i, c in enumerate(calls[before:before + 10]):
-        print(f"DLCALL{i}", json.dumps(c, ensure_ascii=False)[:900])
+        print('no download event:', str(e)[:120])
+    dump('FINAL')
     b.close()

@@ -22,12 +22,12 @@ jobs:
         env:
           LINK: ${{ inputs.link }}
         run: |
-          echo "=== 包内二进制 ==="
-          dpkg -L megacmd | grep -E "bin|debug" | head -10
-          echo "=== mega-debug 存在? ==="
-          which mega-debug && echo FOUND || echo "no mega-debug"
-          echo "=== MEGACMD 日志级别测试 ==="
-          timeout 45 mega-get "$LINK" /tmp/dl9 2>&1 | tail -2 || true
-          echo "=== megacmdserver.log 中的 API 痕迹 ==="
-          grep -aoE "\{\"a\\":[a-z0-9]+" /home/runner/.megaCmd/megacmdserver.log 2>/dev/null | sort | uniq -c | head -20
-          grep -aiE "g.*url|request|cmd" /home/runner/.megaCmd/megacmdserver.log 2>/dev/null | head -10
+          mkdir -p /tmp/dlx
+          timeout 75 mega-debug get "$LINK" /tmp/dlx > /tmp/dbg.log 2>&1 || true
+          echo "=== API 命令序列 ==="
+          grep -aoE "POST https://g.api.mega.co.nz/cs[^ ]*" /tmp/dbg.log | head -5
+          grep -aoE '"a":"[a-z]+"' /tmp/dbg.log | sort | uniq -c | sort -rn | head -15
+          echo "=== us/登录相关 ==="
+          grep -aiE "\\"a\\":\\"us|ephemeral|session|sid" /tmp/dbg.log | head -8
+          echo "=== g 命令上下文 ==="
+          grep -aB2 -A6 '"a":"g"' /tmp/dbg.log | head -40

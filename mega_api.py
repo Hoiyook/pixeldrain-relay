@@ -119,7 +119,7 @@ class Mega:
                 if nm[c]['t'] == 1 and nm[c]['name']:
                     parts.append(nm[c]['name'])
             return '/'.join(reversed(parts))
-        files = [dict(h=h, path=path_of(h), name=n['name'] or h, size=n['size'], key=n['key'])
+        files = [dict(h=h, path=path_of(h), name=n['name'] or h, size=n['size'], key=n['key'], ts=n.get('ts', 0))
                  for h, n in nm.items() if n['t'] == 0]
         files.sort(key=lambda x: (x['path'], x['name']))
         return files
@@ -242,7 +242,7 @@ def main():
                         print('  SEG fail:', seg[:60], e)
     elif mode == 'ls':
         for f in m.ls():
-            print(json.dumps({k: f[k] for k in ('h', 'path', 'name', 'size')}, ensure_ascii=True))
+            print(json.dumps({k: f[k] for k in ('h', 'path', 'name', 'size', 'ts')}, ensure_ascii=True))
     elif mode == 'gdebug':
         h = sys.argv[3]
         r = m.api([{'a': 'l', 'n': h}])

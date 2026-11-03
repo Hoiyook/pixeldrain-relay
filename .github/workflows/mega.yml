@@ -25,7 +25,7 @@ jobs:
           TAG:    ${{ inputs.tag }}
         run: |
           M="$MODE"; [ "$M" = "probe" ] && M="ls"
-          if [ "$M" = "ls" ] || [ "$M" = "debug" ] || [ "$M" = "gdebug" ] || [ "$M" = "gdebug2" ]; then
+          if [ "$M" = "ls" ] || [ "$M" = "debug" ] || [ "$M" = "gdebug" ] || [ "$M" = "gdebug2" ] || [ "$M" = "gdebug3" ]; then
             python3 mega_api.py "$M" "$LINK" "$HANDLE"
           else
             set -euo pipefail

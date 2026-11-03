@@ -134,23 +134,16 @@ class Mega:
         return n
 
     def file_url(self, h):
-        last = 'no url'
-        # 现代 API: 先拿节点公开句柄(a:l), 再 g(p=ph) 取直链
-        r = self.api([{'a': 'l', 'n': h}])
-        ph = r if isinstance(r, str) else None
-        if ph:
-            for seq in ([{'a': 'g', 'p': ph, 'v': 1}], [{'a': 'g', 'p': ph}]):
-                r = self.api(seq)
-                if isinstance(r, dict) and r.get('g'):
-                    return r['g'], int(r['s'])
-                last = r
-        # 旧式回退: 直接 g(n=h)
-        for seq in ([{'a': 'g', 'n': h, 'v': 1}], [{'a': 'g', 'n': h}]):
+        for seq in ([{'a': 'g', 'v': 2, 'g': 1, 'ssl': 1, 'n': h}],
+                    [{'a': 'g', 'v': 2, 'g': 1, 'n': h}],
+                    [{'a': 'g', 'n': h}]):
             r = self.api(seq)
             if isinstance(r, dict) and r.get('g'):
-                return r['g'], int(r['s'])
-            last = r
-        raise SystemExit(f'g failed: {json.dumps(last)[:200]}')
+                g = r['g']
+                if isinstance(g, list):
+                    g = g[0]
+                return g, int(r['s'])
+        raise SystemExit(f'g failed v2: {json.dumps(r)[:200]}')
 
     def file_mac(self, fk, data, size):
         aeskey = xor16(fk[:16], fk[16:])
@@ -215,7 +208,39 @@ class Mega:
 def main():
     mode, link = sys.argv[1], sys.argv[2]
     m = Mega(link)
-    if mode == 'debug':
+    if mode == 'harvest':
+        link, budget = sys.argv[2], int(sys.argv[3])
+        dest, donef = sys.argv[4], sys.argv[5]
+        m = Mega(link)
+        nm = m.nodes()
+        done = set()
+        if os.path.exists(donef):
+            done = set(x.strip() for x in open(donef) if x.strip())
+        got = 0
+        for line in open('mega_files.tsv'):
+            parts = line.rstrip('\n').split('\t')
+            h, size, asset, name, path = parts[0], int(parts[1]), parts[2], parts[3], parts[4]
+            if asset in done:
+                continue
+            n = nm.get(h)
+            if not n or not n['key']:
+                print(f'SKIP_NOKEY {asset}')
+                continue
+            outp = f'{dest}/{path}/{name}'
+            os.makedirs(os.path.dirname(outp), exist_ok=True)
+            if got >= budget:
+                print(f'BUDGET_STOP at {asset}')
+                break
+            print(f'GET {asset} ({size} bytes)', flush=True)
+            try:
+                m.download(h, outp, want_mac=False)
+                got += size
+                print(f'GOT {asset} {size}', flush=True)
+            except SystemExit as e:
+                print(f'FAIL {asset}: {e}', flush=True)
+                break
+        print(f'HARVEST_DONE bytes_this_round={got}')
+    elif mode == 'debug':
         r = m.api([{'a': 'f', 'c': 1, 'r': 1}])
         if isinstance(r, int):
             raise SystemExit(f'list errno {-r}')

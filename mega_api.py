@@ -130,6 +130,16 @@ class Mega:
 
     def file_url(self, h):
         last = 'no url'
+        # 现代 API: 先拿节点公开句柄(a:l), 再 g(p=ph) 取直链
+        r = self.api([{'a': 'l', 'n': h}])
+        ph = r if isinstance(r, str) else None
+        if ph:
+            for seq in ([{'a': 'g', 'p': ph, 'v': 1}], [{'a': 'g', 'p': ph}]):
+                r = self.api(seq)
+                if isinstance(r, dict) and r.get('g'):
+                    return r['g'], int(r['s'])
+                last = r
+        # 旧式回退: 直接 g(n=h)
         for seq in ([{'a': 'g', 'n': h, 'v': 1}], [{'a': 'g', 'n': h}]):
             r = self.api(seq)
             if isinstance(r, dict) and r.get('g'):

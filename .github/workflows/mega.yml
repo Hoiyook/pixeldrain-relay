@@ -29,7 +29,7 @@ jobs:
             python3 mega_api.py "$M" "$LINK"
           else
             set -euo pipefail
-            echo "$ASSET" | grep -qE '^[A-Za-z0-9._-]+$' || { echo "bad asset name"; exit 1; }
+            echo "$ASSET" | grep -qE '^[A-Za-z0-9._()-]+$' || { echo "bad asset name"; exit 1; }
             gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
             TMP="/tmp/dl_$HANDLE"
             python3 mega_api.py get "$LINK" "$HANDLE" -o "$TMP" | tee /tmp/getlog.txt

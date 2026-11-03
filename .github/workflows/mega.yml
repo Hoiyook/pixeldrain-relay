@@ -4,6 +4,7 @@ on:
     inputs:
       mode:  {required: true, type: string}
       link:  {required: true, type: string}
+      tag:   {required: false, type: string, default: ''}
 jobs:
   run:
     runs-on: ubuntu-24.04
@@ -11,7 +12,39 @@ jobs:
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
-      - run: pip install --quiet pycryptodome
-      - name: List with ts
-        if: ${{ inputs.mode == 'probe' }}
-        run: python3 mega_api.py ls "${{ inputs.link }}"
+      - name: Install megacmd
+        run: |
+          DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1)
+          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megac.deb
+          sudo apt-get install -y -qq /tmp/megac.deb
+      - name: Mtime test
+        if: ${{ inputs.mode == 'mtimetest' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LINK: ${{ inputs.link }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/dl /tmp/pf
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done.txt || true
+          N=0
+          while IFS=$'\t' read -r h size asset name path sh ts; do
+            if grep -q "^${asset}\.part-" /tmp/done.txt && [ $N -lt 4 ]; then
+              mkdir -p "/tmp/dl/$path"
+              gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p "${asset}.part-*" -D /tmp/pf --clobber >/dev/null 2>&1
+              cat /tmp/pf/${asset}.part-* > "/tmp/dl/$path/$name"
+              rm -f /tmp/pf/${asset}.part-*
+              touch -d "@$ts" "/tmp/dl/$path/$name"
+              N=$((N+1))
+              echo "预填(ts=$ts): $name"
+            fi
+          done < mega_files.tsv
+          echo "=== mega-get 75秒 (带正确 mtime 的预填) ==="
+          timeout 75 mega-get "$LINK" /tmp/dl > /tmp/mg.log 2>&1 || true
+          echo "=== 预填文件是否被复制出(1)副本 ==="
+          find /tmp/dl -type f -name "*(1)*" | head -5
+          echo "(无输出=没有被复制, mtime判定生效!)"
+          echo "=== 新下载的字节 ==="
+          du -sB1 /tmp/dl | cut -f1
+          echo "=== 下载的文件列表 ==="
+          find /tmp/dl -type f -printf "%s %p\n" | sort -rn | head -12

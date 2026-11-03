@@ -238,6 +238,25 @@ def main():
     elif mode == 'ls':
         for f in m.ls():
             print(json.dumps({k: f[k] for k in ('h', 'path', 'name', 'size')}, ensure_ascii=True))
+    elif mode == 'gdebug':
+        h = sys.argv[3]
+        r = m.api([{'a': 'l', 'n': h}])
+        print('a:l ->', repr(r)[:300])
+        ph = None
+        if isinstance(r, str):
+            ph = r
+        elif isinstance(r, list) and len(r) == 2 and isinstance(r[1], str):
+            ph = r[1]
+        elif isinstance(r, list) and len(r) == 2 and isinstance(r[0], int) and r[0] == 0 and isinstance(r[1], str):
+            ph = r[1]
+        print('ph =', repr(ph))
+        for seq in ([{'a': 'g', 'p': ph, 'v': 1}] if ph else [],
+                    [{'a': 'g', 'n': h, 'v': 1}],
+                    [{'a': 'g', 'n': h, 'ssl': 2}]):
+            if not seq:
+                continue
+            r = m.api(seq)
+            print(seq[0].get('p', seq[0].get('n')), seq[0].get('a'), '->', repr(r)[:300])
     elif mode == 'get':
         h = sys.argv[3]
         out = sys.argv[sys.argv.index('-o') + 1] if '-o' in sys.argv else h

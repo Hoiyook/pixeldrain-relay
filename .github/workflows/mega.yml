@@ -20,6 +20,8 @@ jobs:
           sudo apt-get install -y -qq /tmp/megac.deb
       - name: Dummy test
         if: ${{ inputs.mode == 'dummy-test' }}
+        env:
+          LINK: ${{ inputs.link }}
         run: |
           mkdir -p "/tmp/dl/Old Youtube Videos/Youtube Shorts"
           truncate -s 11009147 "/tmp/dl/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4"

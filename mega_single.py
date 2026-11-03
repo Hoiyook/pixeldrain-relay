@@ -65,7 +65,7 @@ def main():
     sid = random.randint(0, 2 ** 31)
     api = f'https://g.api.mega.co.nz/cs?id={sid}'
     req = urllib.request.Request(api, data=json.dumps([{'a': 'g', 'p': handle}]).encode(),
-                                 headers={'Content-Type': 'application/json', **UA})
+                                 headers={'Content-Type': 'text/plain;charset=UTF-8', 'Referer': 'https://mega.nz/', 'Origin': 'https://mega.nz', **UA})
     r = json.loads(urllib.request.urlopen(req, timeout=60).read().decode())[0]
     if not (isinstance(r, dict) and r.get('g')):
         raise SystemExit(f'g failed: {json.dumps(r)[:200]}')

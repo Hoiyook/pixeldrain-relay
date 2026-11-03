@@ -47,11 +47,14 @@ def mega_chunks(size):
 class Mega:
     def __init__(self, link):
         self.handle, self.mkey = parse_link(link)
-        self.sid = random.randint(0, 2 ** 31)
+        self._reqid = random.randint(10000, 99999)
         self._nodes = None
 
     def api(self, seq, n=None):
-        url = f'https://g.api.mega.co.nz/cs?id={self.sid}'
+        self._reqid += 1
+        url = f'https://g.api.mega.co.nz/cs?id={self._reqid}'
+        if n is None:
+            n = self.handle
         if n:
             url += f'&n={n}'
         req = urllib.request.Request(url, data=json.dumps(seq).encode(),

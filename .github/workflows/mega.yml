@@ -83,12 +83,21 @@ jobs:
           done
           kill $MGPID 2>/dev/null || true
           sleep 3
-          echo "=== 上传本分片完成的文件 ==="
+          echo "=== 上传本分片完成的文件(含泄漏回收) ==="
+          # 收集所有"实际新下载"的文件 (大小 -> 路径 映射, 用于回收跳过失败被误下的文件)
+          find /tmp/dl -type f -newer /tmp/dl_start_marker -printf "%s\t%p\n" 2>/dev/null | sort -rn > /tmp/new_files.tsv
+          echo "新下载文件数: $(wc -l < /tmp/new_files.tsv)"
+          grep -iE "skip|exist|already|download|error" /home/runner/.megaCmd/megacmdserver.log 2>/dev/null | tail -25 || true
           MISS=0; DONE=0
           while IFS=$'\t' read -r h size asset name path sh; do
             [ "$sh" = "$SHARD" ] || continue
             F="/tmp/dl/$path/$name"
-            if [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
+            if [ ! -f "$F" ] || [ "$(stat -c%s "$F")" != "$size" ]; then
+              # 路径上没有 -> 尝试按大小从新下载文件里回收
+              F=$(awk -F'\t' -v s="$size" '$1 == s {print $2; exit}' /tmp/new_files.tsv)
+              [ -n "$F" ] && echo "回收(按大小): $F -> $name"
+            fi
+            if [ -n "$F" ] && [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
               split -b 1900m -d "$F" "/tmp/${asset}.part-"
               gh release upload "$TAG" /tmp/"${asset}".part-* --clobber && DONE=$((DONE+1)) || echo "UPLOAD_FAIL $name"
               rm -f /tmp/"${asset}".part-* "$F"
@@ -96,6 +105,8 @@ jobs:
               echo "MISSING $name"
               MISS=$((MISS+1))
             fi
+            # 从回收清单里移除已用条目, 防止同名大小误配
+            [ -n "$F" ] && grep -v "^$size\t" /tmp/new_files.tsv > /tmp/new_files.tsv.tmp 2>/dev/null && mv /tmp/new_files.tsv.tmp /tmp/new_files.tsv || true
           done < mega_files.tsv
           echo "SHARD $SHARD 完成=$DONE 缺失=$MISS"
           [ "$MISS" = 0 ] || exit 1

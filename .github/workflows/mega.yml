@@ -40,7 +40,7 @@ jobs:
         run: |
           echo "=== mega-get --help 全文 ==="
           mega-get --help 2>&1 | head -40
-          echo "=== 全量占位 + 60秒下载 -> 覆盖还是跳过? ==="
+          echo "=== 全量占位 + mega-get -m 75秒 -> 应零传输! ==="
           mkdir -p /tmp/dl
           touch /tmp/m0
           while IFS=$'\t' read -r h size asset name path sh; do
@@ -48,7 +48,7 @@ jobs:
             truncate -s "$size" "/tmp/dl/$path/$name"
           done < mega_files.tsv
           echo "占位实际磁盘占用: $(du -sB1 /tmp/dl | cut -f1)"
-          timeout 60 mega-get "$LINK" /tmp/dl 2>&1 | tail -3 || true
+          timeout 75 mega-get -m "$LINK" /tmp/dl 2>&1 | tail -3 || true
           echo "=== 60秒后: 实际磁盘占用 ==="
           du -sB1 /tmp/dl | cut -f1
           echo "=== 内容被改写的占位(mtime变新 = 被覆盖下载) ==="

@@ -4,34 +4,14 @@ on:
     inputs:
       mode:  {required: true, type: string}
       link:  {required: true, type: string}
-      tag:   {required: false, type: string, default: ''}
 jobs:
   run:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
-      - name: Install megacmd
-        run: |
-          DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1)
-          wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megac.deb
-          sudo apt-get install -y -qq /tmp/megac.deb
-      - name: Debug probe
-        if: ${{ inputs.mode == 'debugprobe' }}
-        env:
-          LINK: ${{ inputs.link }}
-        run: |
-          mkdir -p /tmp/dlx
-          timeout 75 mega-debug get "$LINK" /tmp/dlx > /tmp/dbg.log 2>&1 || true
-          wc -c /tmp/dbg.log
-          echo ----HEAD----
-          head -c 3000 /tmp/dbg.log
-          echo ----MARK----
-          grep -naEcs . /dev/null 2>/dev/null || true
-          grep -c a: /tmp/dbg.log || true
-          echo ----SAMPLE----
-          grep -an "cs?" /tmp/dbg.log | head -6
-          grep -an "\x27a\x27" /tmp/dbg.log | head -4
-          echo ----TAIL----
-          tail -c 2500 /tmp/dbg.log
+      - run: pip install --quiet pycryptodome
+      - name: List with ts
+        if: ${{ inputs.mode == 'probe' }}
+        run: python3 mega_api.py ls "${{ inputs.link }}"

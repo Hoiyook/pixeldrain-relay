@@ -35,7 +35,14 @@ jobs:
           SHARD: ${{ inputs.shard }}
         run: |
           mkdir -p /tmp/dl
-          if [ "$MODE" = "megadl-test" ]; then
+          if [ "$MODE" = "single-test" ]; then
+            echo "=== 按路径下载单个文件 ==="
+            mkdir -p /tmp/dl3
+            mega-get "${LINK}/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4" /tmp/dl3 2>&1 | tail -3 || true
+            find /tmp/dl3 -type f -exec ls -la {} \; 2>/dev/null | head -5
+            echo "=== 带引号路径测试(根目录文件) ==="
+            ls /tmp/dl2 2>/dev/null | head -5
+          elif [ "$MODE" = "megadl-test" ]; then
             echo "=== A. megadl 匿名测试 (90秒后杀掉) ==="
             timeout 90 megadl "$LINK" --path /tmp/dl 2>&1 | head -20 || true
             echo "=== A. 下载结果 ==="

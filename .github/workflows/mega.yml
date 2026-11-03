@@ -34,7 +34,9 @@ jobs:
           TAG:    ${{ inputs.tag }}
           SHARD:  ${{ inputs.shard }}
         run: |
-          if [ "$MODE" = "gdebug5" ]; then
+          if [ "$MODE" = "gdebug6" ]; then
+            python3 mega_api.py gdebug6 "$LINK" "$HANDLE"
+          elif [ "$MODE" = "gdebug5" ]; then
             python3 mega_api.py gdebug5 "$LINK" "$HANDLE"
           elif [ "$MODE" = "megacmd-test" ]; then
             echo "=== mega-ls (anon) ==="

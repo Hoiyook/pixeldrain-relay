@@ -8,7 +8,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-24.04
-    timeout-minutes: 110
+    timeout-minutes: 60
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
@@ -17,16 +17,54 @@ jobs:
           DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1)
           wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megac.deb
           sudo apt-get install -y -qq /tmp/megac.deb
-      - name: Perfile test
-        if: ${{ inputs.mode == 'perfile' }}
+      - name: Fish
+        if: ${{ inputs.mode == 'belt' }}
         env:
+          GH_TOKEN: ${{ github.token }}
           LINK: ${{ inputs.link }}
+          TAG: ${{ inputs.tag }}
         run: |
-          mkdir -p /tmp/dl4
-          echo "=== 变体1: 原样路径 ==="
-          timeout 60 mega-get "${LINK}/Old Youtube Videos/Youtube Shorts/Anby She Wolf (Sakura G).mp4" /tmp/dl4 2>&1 | tail -2 || true
-          find /tmp/dl4 -type f -printf "%s %p\n" | head -5
-          echo "=== 变体2: URL编码 ==="
-          mkdir -p /tmp/dl5
-          timeout 60 mega-get "${LINK}/Old%20Youtube%20Videos/Youtube%20Shorts/Anby%20She%20Wolf%20%28Sakura%20G%29.mp4" /tmp/dl5 2>&1 | tail -2 || true
-          find /tmp/dl5 -type f -printf "%s %p\n" | head -5
+          set -uo pipefail
+          gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
+          mkdir -p /tmp/dl
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done_before.txt || true
+          echo "轮前资产: $(wc -l < /tmp/done_before.txt)"
+          stdbuf -oL mega-get "$LINK" /tmp/dl > /tmp/mg.log 2>&1 &
+          MGPID=$!
+          START=$(date +%s); LAST=""; FROZEN=0
+          while kill -0 $MGPID 2>/dev/null; do
+            sleep 30
+            NOW=$(date +%s)
+            DL=$(du -sB1 /tmp/dl 2>/dev/null | cut -f1)
+            Q=$(grep -ci "quota" /tmp/mg.log 2>/dev/null || echo 0)
+            echo "[t=$((NOW - START))s] 目录: $DL, 配额报错: $Q"
+            if [ "$DL" = "$LAST" ]; then
+              FROZEN=$((FROZEN+1))
+              if [ $FROZEN -ge 4 ]; then echo "冻结中止"; kill $MGPID 2>/dev/null; break; fi
+            else
+              FROZEN=0
+            fi
+            LAST=$DL
+            if [ $((NOW - START)) -gt 1200 ]; then echo "20分钟中止"; kill $MGPID 2>/dev/null; break; fi
+          done
+          sleep 3
+          echo "下载结束, 目录: $(du -sB1 /tmp/dl | cut -f1)"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done2.txt || true
+          find /tmp/dl -type f ! -name ".*" -printf "%s\t%p\n" | sort -rn > /tmp/all_files.tsv
+          UP=0; MISS=0
+          while IFS=$'\t' read -r h size asset name path sh; do
+            grep -q "^${asset}\.part-" /tmp/done2.txt && continue
+            F="/tmp/dl/$path/$name"
+            if [ ! -f "$F" ] || [ "$(stat -c%s "$F")" != "$size" ]; then
+              F=$(awk -F'\t' -v s="$size" '$1 == s {print $2; exit}' /tmp/all_files.tsv)
+            fi
+            if [ -n "$F" ] && [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
+              split -b 1900m -d "$F" "/tmp/${asset}.part-"
+              gh release upload "$TAG" /tmp/"${asset}".part-* --clobber >/dev/null 2>&1 && UP=$((UP+1)) || echo "UPLOAD_FAIL $name"
+              rm -f /tmp/"${asset}".part-* "$F"
+              grep -vF "$F" /tmp/all_files.tsv > /tmp/af.tmp 2>/dev/null && mv /tmp/af.tmp /tmp/all_files.tsv || true
+            else
+              MISS=$((MISS+1))
+            fi
+          done < mega_files.tsv
+          echo "BELT_RESULT uploaded=$UP missing=$MISS"

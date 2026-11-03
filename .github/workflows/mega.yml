@@ -8,15 +8,19 @@ on:
 jobs:
   run:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
+      - run: pip install --quiet pycryptodome
       - name: Install megacmd
         run: |
           DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[0-9][^"]*_amd64\.deb' | sort -uV | tail -1)
           wget -q "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/$DEB" -O /tmp/megac.deb
           sudo apt-get install -y -qq /tmp/megac.deb
+      - name: Probe
+        if: ${{ inputs.mode == 'probe' }}
+        run: python3 mega_api.py ls "${{ inputs.link }}"
       - name: Mtime test
         if: ${{ inputs.mode == 'mtimetest' }}
         env:
@@ -39,12 +43,60 @@ jobs:
               echo "预填(ts=$ts): $name"
             fi
           done < mega_files.tsv
-          echo "=== mega-get 75秒 (带正确 mtime 的预填) ==="
           timeout 75 mega-get "$LINK" /tmp/dl > /tmp/mg.log 2>&1 || true
-          echo "=== 预填文件是否被复制出(1)副本 ==="
+          echo "=== (1)副本检查(无输出=skip生效) ==="
           find /tmp/dl -type f -name "*(1)*" | head -5
-          echo "(无输出=没有被复制, mtime判定生效!)"
-          echo "=== 新下载的字节 ==="
-          du -sB1 /tmp/dl | cut -f1
-          echo "=== 下载的文件列表 ==="
+          echo "=== 全部文件 ==="
           find /tmp/dl -type f -printf "%s %p\n" | sort -rn | head -12
+      - name: Fish
+        if: ${{ inputs.mode == 'belt' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LINK: ${{ inputs.link }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -uo pipefail
+          gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
+          mkdir -p /tmp/dl
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done_before.txt || true
+          echo "轮前资产: $(wc -l < /tmp/done_before.txt)"
+          stdbuf -oL mega-get "$LINK" /tmp/dl > /tmp/mg.log 2>&1 &
+          MGPID=$!
+          START=$(date +%s); LAST=""; FROZEN=0
+          while kill -0 $MGPID 2>/dev/null; do
+            sleep 30
+            NOW=$(date +%s)
+            DL=$(du -sB1 /tmp/dl 2>/dev/null | cut -f1)
+            Q=$(grep -ci "quota" /tmp/mg.log 2>/dev/null || echo 0)
+            echo "[t=$((NOW - START))s] 目录: $DL, 配额报错: $Q"
+            if [ "$DL" = "$LAST" ]; then
+              FROZEN=$((FROZEN+1))
+              if [ $FROZEN -ge 4 ]; then echo "冻结中止"; kill $MGPID 2>/dev/null; break; fi
+            else
+              FROZEN=0
+            fi
+            LAST=$DL
+            if [ $((NOW - START)) -gt 1200 ]; then echo "20分钟中止"; kill $MGPID 2>/dev/null; break; fi
+          done
+          sleep 3
+          echo "下载结束, 目录: $(du -sB1 /tmp/dl | cut -f1)"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done2.txt || true
+          find /tmp/dl -type f ! -name ".*" -printf "%s\t%p\n" | sort -rn > /tmp/all_files.tsv
+          echo "实际文件: $(wc -l < /tmp/all_files.tsv)"
+          UP=0; MISS=0
+          while IFS=$'\t' read -r h size asset name path sh ts; do
+            grep -q "^${asset}\.part-" /tmp/done2.txt && continue
+            F="/tmp/dl/$path/$name"
+            if [ ! -f "$F" ] || [ "$(stat -c%s "$F")" != "$size" ]; then
+              F=$(awk -F'\t' -v s="$size" '$1 == s {print $2; exit}' /tmp/all_files.tsv)
+            fi
+            if [ -n "$F" ] && [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
+              split -b 1900m -d "$F" "/tmp/${asset}.part-"
+              gh release upload "$TAG" /tmp/"${asset}".part-* --clobber >/dev/null 2>&1 && UP=$((UP+1)) || echo "UPLOAD_FAIL $name"
+              rm -f /tmp/"${asset}".part-* "$F"
+              grep -vF "$F" /tmp/all_files.tsv > /tmp/af.tmp 2>/dev/null && mv /tmp/af.tmp /tmp/all_files.tsv || true
+            else
+              MISS=$((MISS+1))
+            fi
+          done < mega_files.tsv
+          echo "BELT_RESULT uploaded=$UP missing=$MISS"

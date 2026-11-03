@@ -56,17 +56,26 @@ jobs:
           kill $MGPID 2>/dev/null || true
           sleep 3
           echo "mega-get 结束, 目录: $(du -sB1 /tmp/dl | cut -f1)"
-          tail -c 400 /tmp/mg.log
+          echo "=== 目录布局诊断 ==="
+          find /tmp/dl -maxdepth 2 -type d | head -8
+          find /tmp/dl -type f ! -name ".*" -printf "%s\t%p\n" | sort -rn > /tmp/all_files.tsv
+          echo "实际文件数: $(wc -l < /tmp/all_files.tsv), 前6:"
+          head -6 /tmp/all_files.tsv
           # 上传所有新完成文件
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done2.txt || true
           UP=0; MISS=0
           while IFS=$'\t' read -r h size asset name path sh; do
             grep -q "^${asset}\.part-" /tmp/done2.txt && continue
             F="/tmp/dl/$path/$name"
-            if [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
+            if [ ! -f "$F" ] || [ "$(stat -c%s "$F")" != "$size" ]; then
+              F=$(awk -F'\t' -v s="$size" '$1 == s {print $2; exit}' /tmp/all_files.tsv 2>/dev/null)
+              [ -n "$F" ] && echo "尺寸回收: $F -> $name"
+            fi
+            if [ -n "$F" ] && [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
               split -b 1900m -d "$F" "/tmp/${asset}.part-"
               gh release upload "$TAG" /tmp/"${asset}".part-* --clobber >/dev/null 2>&1 && UP=$((UP+1)) || echo "UPLOAD_FAIL $name"
               rm -f /tmp/"${asset}".part-* "$F"
+              grep -vF "$F" /tmp/all_files.tsv > /tmp/af.tmp 2>/dev/null && mv /tmp/af.tmp /tmp/all_files.tsv || true
             else
               MISS=$((MISS+1))
             fi

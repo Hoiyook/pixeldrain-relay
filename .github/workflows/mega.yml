@@ -56,7 +56,7 @@ jobs:
           START=$(date +%s)
           while true; do
             TODO=0
-            while IFS=$'\t' read -r h size name path sh; do
+            while IFS=$'\t' read -r h size asset name path sh; do
               [ "$sh" = "$SHARD" ] || continue
               [ -f "/tmp/dl/$path/$name" ] || TODO=1
             done < mega_files.tsv
@@ -69,14 +69,13 @@ jobs:
           sleep 3
           echo "=== 上传本分片完成的文件 ==="
           MISS=0; DONE=0
-          while IFS=$'\t' read -r h size name path sh; do
+          while IFS=$'\t' read -r h size asset name path sh; do
             [ "$sh" = "$SHARD" ] || continue
             F="/tmp/dl/$path/$name"
             if [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
-              SAFE=$(echo "$name" | tr -c 'A-Za-z0-9._()-' '_' | cut -c1-90)
-              split -b 1900m -d "$F" "/tmp/${SAFE}.part-"
-              gh release upload "$TAG" /tmp/"${SAFE}".part-* --clobber && DONE=$((DONE+1)) || echo "UPLOAD_FAIL $name"
-              rm -f /tmp/"${SAFE}".part-* "$F"
+              split -b 1900m -d "$F" "/tmp/${asset}.part-"
+              gh release upload "$TAG" /tmp/"${asset}".part-* --clobber && DONE=$((DONE+1)) || echo "UPLOAD_FAIL $name"
+              rm -f /tmp/"${asset}".part-* "$F"
             else
               echo "MISSING $name"
               MISS=$((MISS+1))

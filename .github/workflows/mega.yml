@@ -49,8 +49,8 @@ jobs:
             mkdir -p "/tmp/dl/$path"
             truncate -s "$size" "/tmp/dl/$path/$name"
           done
-          echo "占位完成, 后台启动 mega-get"
-          mega-get "$LINK" /tmp/dl > /tmp/mega_get.log 2>&1 &
+          echo "占位完成, 启动 mega-get (进度直出)"
+          stdbuf -oL mega-get "$LINK" /tmp/dl 2>&1 | stdbuf -oL grep -vE "^TRANSFERRING\s*\|+\|" &
           MGPID=$!
           # 等待本分片所有文件就绪(精确大小) 或 50 分钟超时
           START=$(date +%s)
@@ -62,7 +62,10 @@ jobs:
             done < mega_files.tsv
             [ "$TODO" = 0 ] && break
             NOW=$(date +%s)
+            DLREAL=$(du -sB1 /tmp/dl 2>/dev/null | cut -f1)
+            echo "[t=$((NOW - START))s] 实际下载字节: $DLREAL, mega-get存活: $(kill -0 $MGPID 2>/dev/null && echo yes || echo DEAD)"
             [ $((NOW - START)) -gt 3000 ] && break
+            kill -0 $MGPID 2>/dev/null || { echo "mega-get 已退出"; sleep 3; break; }
             sleep 15
           done
           kill $MGPID 2>/dev/null || true

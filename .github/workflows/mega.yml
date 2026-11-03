@@ -16,6 +16,7 @@ jobs:
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
+      - run: pip install --quiet pycryptodome
       - name: Install MEGAcmd
         run: |
           DEB=$(wget -qO- "https://mega.nz/linux/repo/xUbuntu_24.04/amd64/" | grep -oE 'megacmd_[^"]*_amd64\.deb' | head -1)
@@ -33,7 +34,9 @@ jobs:
           TAG:    ${{ inputs.tag }}
           SHARD:  ${{ inputs.shard }}
         run: |
-          if [ "$MODE" = "megacmd-test" ]; then
+          if [ "$MODE" = "gdebug5" ]; then
+            python3 mega_api.py gdebug5 "$LINK" "$HANDLE"
+          elif [ "$MODE" = "megacmd-test" ]; then
             echo "=== mega-ls (anon) ==="
             mega-ls -l "$LINK" 2>&1 | head -15
             echo "=== mega-get smoke ==="

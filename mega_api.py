@@ -50,8 +50,9 @@ class Mega:
         self.sid = random.randint(0, 2 ** 31)
         self._nodes = None
 
-    def api(self, seq):
-        url = f'https://g.api.mega.co.nz/cs?id={self.sid}&n={self.handle}'
+    def api(self, seq, n=None):
+        n = n or self.handle
+        url = f'https://g.api.mega.co.nz/cs?id={self.sid}&n={n}'
         req = urllib.request.Request(url, data=json.dumps(seq).encode(),
                                      headers={'Content-Type': 'application/json', **UA})
         last = None
@@ -257,6 +258,24 @@ def main():
                 continue
             r = m.api(seq)
             print(seq[0].get('p', seq[0].get('n')), seq[0].get('a'), '->', repr(r)[:300])
+    elif mode == 'gdebug2':
+        h = sys.argv[3]
+        # 找分享根句柄: f 响应里根节点的 h
+        r = m.api([{'a': 'f', 'c': 1, 'r': 1}])
+        root = None
+        for nd in r['f']:
+            if nd.get('p') not in {x.get('h') for x in r['f']} or nd.get('h') == m.handle:
+                root = nd.get('h')
+        print('root candidates:', [nd.get('h') for nd in r['f']][:5])
+        for nn in (root, m.handle):
+            if not nn:
+                continue
+            r = m.api([{'a': 'g', 'n': h, 'v': 1}], n=nn)
+            print(f'g(via n={nn}) ->', repr(r)[:250])
+            if isinstance(r, dict) and 'fh' in r:
+                fh = r['fh']
+                r2 = m.api([{'a': 'g', 'p': fh, 'v': 1}], n=nn)
+                print(f'g(p=fh) ->', repr(r2)[:250])
     elif mode == 'get':
         h = sys.argv[3]
         out = sys.argv[sys.argv.index('-o') + 1] if '-o' in sys.argv else h

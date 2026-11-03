@@ -25,33 +25,36 @@ jobs:
         run: |
           set -uo pipefail
           gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done_assets.txt || true
-          DONE_N=$(wc -l < /tmp/done_assets.txt)
-          echo "已完成资产: $DONE_N"
           mkdir -p /tmp/dl /tmp/prefill
-          # 预填: 已完成文件的真实内容 (内容相同 -> megacmd 跳过)
-          n=0
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done_assets.txt || true
+          echo "已完成资产: $(wc -l < /tmp/done_assets.txt)"
+          # 一次拉全部资产
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p "*.part-*" -D /tmp/prefill --clobber >/dev/null 2>&1 || true
           while IFS=$'\t' read -r h size asset name path sh; do
-            if grep -q "^${asset}\.part-" /tmp/done_assets.txt; then
+            if ls /tmp/prefill/${asset}.part-* >/dev/null 2>&1; then
               mkdir -p "/tmp/dl/$path"
-              gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p "${asset}.part-*" -D /tmp/prefill --clobber >/dev/null 2>&1
               cat /tmp/prefill/${asset}.part-* > "/tmp/dl/$path/$name"
               rm -f /tmp/prefill/${asset}.part-*
-              n=$((n+1))
             fi
           done < mega_files.tsv
-          echo "预填文件数: $n, 占用: $(du -sB1 /tmp/dl | cut -f1)"
-          touch /tmp/m0
-          echo "=== mega-get 启动 (60秒采样) ==="
-          timeout 60 mega-get "$LINK" /tmp/dl > /tmp/mg.log 2>&1 || true
-          echo "下载字节: $(du -sB1 /tmp/dl | cut -f1)"
-          echo "=== 预填文件是否被动过(mtime不变=被跳过) ==="
+          rm -rf /tmp/prefill
+          echo "预填占用: $(du -sB1 /tmp/dl | cut -f1)"
+          # 下载直到配额死或全部完成 (40分钟保险)
+          timeout 2400 mega-get "$LINK" /tmp/dl > /tmp/mg.log 2>&1 || true
+          echo "mega-get 结束, 目录: $(du -sB1 /tmp/dl | cut -f1)"
+          grep -c "quota" /tmp/mg.log 2>/dev/null | awk '{print "配额报错行: "$1}'
+          # 上传所有新完成文件
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done2.txt || true
+          UP=0; MISS=0
           while IFS=$'\t' read -r h size asset name path sh; do
-            if grep -q "^${asset}\.part-" /tmp/done_assets.txt; then
-              F="/tmp/dl/$path/$name"
-              [ -f "$F" ] && echo "$(stat -c%s "$F") $(stat -c%Y "$F") $path/$name"
+            grep -q "^${asset}\.part-" /tmp/done2.txt && continue
+            F="/tmp/dl/$path/$name"
+            if [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
+              split -b 1900m -d "$F" "/tmp/${asset}.part-"
+              gh release upload "$TAG" /tmp/"${asset}".part-* --clobber >/dev/null 2>&1 && UP=$((UP+1)) || echo "UPLOAD_FAIL $name"
+              rm -f /tmp/"${asset}".part-* "$F"
+            else
+              MISS=$((MISS+1))
             fi
-          done < mega_files.tsv | head -8
-          echo "=== 新完成的文件(前10) ==="
-          find /tmp/dl -type f -newer /tmp/m0 -printf "%s %p\n" 2>/dev/null | sort -rn | head -10
-          tail -5 /tmp/mg.log
+          done < mega_files.tsv
+          echo "BELT_RESULT uploaded=$UP missing=$MISS total_done=$(( $(wc -l < /tmp/done2.txt) + UP ))"

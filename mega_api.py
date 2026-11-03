@@ -199,7 +199,32 @@ class Mega:
 def main():
     mode, link = sys.argv[1], sys.argv[2]
     m = Mega(link)
-    if mode == 'ls':
+    if mode == 'debug':
+        r = m.api([{'a': 'f', 'c': 1, 'r': 1}])
+        if isinstance(r, int):
+            raise SystemExit(f'list errno {-r}')
+        files = [n for n in r['f'] if n.get('t') == 0][:3]
+        print('FOLDERKEY', m.mkey.hex(), 'HANDLE', m.handle)
+        for n in files:
+            print('NODE', json.dumps({k: (v[:80] if isinstance(v, str) else v) for k, v in n.items()})[:500])
+            kf = n.get('k', '')
+            if kf:
+                for seg in kf.split('/'):
+                    part = seg.split(':')[-1]
+                    try:
+                        fk = AES.new(m.mkey, AES.MODE_ECB).decrypt(b64d(part))
+                        print('  SEG', seg[:60], '-> fullkey', fk.hex())
+                        if n.get('t') == 0 and len(fk) == 32:
+                            ak = xor16(fk[:16], fk[16:])
+                            blob = b64d(n.get('a', ''))
+                            try:
+                                dec = AES.new(ak, AES.MODE_CBC, b'\0' * 16).decrypt(blob)
+                                print('  ATTR dec repr:', dec[:80])
+                            except Exception as e:
+                                print('  ATTR fail:', e)
+                    except Exception as e:
+                        print('  SEG fail:', seg[:60], e)
+    elif mode == 'ls':
         for f in m.ls():
             print(json.dumps({k: f[k] for k in ('h', 'path', 'name', 'size')}, ensure_ascii=True))
     elif mode == 'get':

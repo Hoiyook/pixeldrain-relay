@@ -18,20 +18,20 @@ jobs:
           LINK: ${{ inputs.link }}
         run: |
           cat > /tmp/v2.py <<'PYSRC'
-import json, random, urllib.request
-UA = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36'}
-def call(seq, extra=''):
-    url = 'https://g.api.mega.co.nz/cs?id=' + str(random.randint(0, 2**31)) + extra
-    req = urllib.request.Request(url, data=json.dumps(seq).encode(),
-        headers={'Content-Type': 'text/plain;charset=UTF-8', 'Referer': 'https://mega.nz/', **UA})
-    return json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
-fh = 'gcw2nTSK'
-ff = 'hGghhQaZ'
-folder = 'ZTYzCBxD'
-print('T1 file-solo:', json.dumps(call([{'a':'g','v':2,'g':1,'ssl':1,'p':fh}]))[:220])
-print('T2 file-batch:', json.dumps(call([{'a':'ach'},{'a':'pra','rs':{},'ph':fh},{'a':'g','v':2,'g':1,'ssl':1,'p':fh}]))[:220])
-print('T3 folder-v2:', json.dumps(call([{'a':'g','v':2,'g':1,'ssl':1,'n':ff}], '&n=' + folder))[:220])
-print('T4 folder-batch:', json.dumps(call([{'a':'ach'},{'a':'pra','rs':{},'ph':folder},{'a':'g','v':2,'g':1,'ssl':1,'n':ff}], '&n=' + folder))[:220])
-print('T5 file-v2-noparams:', json.dumps(call([{'a':'g','v':2,'p':fh}]))[:220])
-PYSRC
+          import json, random, urllib.request
+          UA = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36'}
+          def call(seq, extra=''):
+              url = 'https://g.api.mega.co.nz/cs?id=' + str(random.randint(0, 2**31)) + extra
+              req = urllib.request.Request(url, data=json.dumps(seq).encode(),
+                  headers={'Content-Type': 'text/plain;charset=UTF-8', 'Referer': 'https://mega.nz/', **UA})
+              return json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
+          fh = 'gcw2nTSK'
+          ff = 'hGghhQaZ'
+          folder = 'ZTYzCBxD'
+          print('T1 file-solo:', json.dumps(call([{'a':'g','v':2,'g':1,'ssl':1,'p':fh}]))[:220])
+          print('T2 file-batch:', json.dumps(call([{'a':'ach'},{'a':'pra','rs':{},'ph':fh},{'a':'g','v':2,'g':1,'ssl':1,'p':fh}]))[:220])
+          print('T3 folder-v2:', json.dumps(call([{'a':'g','v':2,'g':1,'ssl':1,'n':ff}], '&n=' + folder))[:220])
+          print('T4 folder-batch:', json.dumps(call([{'a':'ach'},{'a':'pra','rs':{},'ph':folder},{'a':'g','v':2,'g':1,'ssl':1,'n':ff}], '&n=' + folder))[:220])
+          print('T5 file-v2-noparams:', json.dumps(call([{'a':'g','v':2,'p':fh}]))[:220])
+          PYSRC
           python3 /tmp/v2.py

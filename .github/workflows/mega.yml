@@ -26,7 +26,7 @@ jobs:
         run: |
           M="$MODE"; [ "$M" = "probe" ] && M="ls"
           if [ "$M" = "ls" ] || [ "$M" = "debug" ] || [ "$M" = "gdebug" ]; then
-            python3 mega_api.py "$M" "$LINK"
+            python3 mega_api.py "$M" "$LINK" "$HANDLE"
           else
             set -euo pipefail
             echo "$ASSET" | grep -qE '^[A-Za-z0-9._()-]+$' || { echo "bad asset name"; exit 1; }

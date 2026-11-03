@@ -2,7 +2,7 @@ name: mega
 on:
   workflow_dispatch:
     inputs:
-      mode:  {description: 'probe|get', required: true, type: string}
+      mode:  {description: 'probe|debug|get', required: true, type: string}
       link:  {required: true, type: string}
       handle: {required: false, type: string, default: ''}
       asset: {required: false, type: string, default: ''}
@@ -24,8 +24,8 @@ jobs:
           ASSET:  ${{ inputs.asset }}
           TAG:    ${{ inputs.tag }}
         run: |
-          if [ "$MODE" = "probe" ]; then
-            python3 mega_api.py ls "$LINK"
+          if [ "$MODE" = "probe" ] || [ "$MODE" = "debug" ]; then
+            python3 mega_api.py "$MODE" "$LINK"
           else
             set -euo pipefail
             echo "$ASSET" | grep -qE '^[A-Za-z0-9._-]+$' || { echo "bad asset name"; exit 1; }

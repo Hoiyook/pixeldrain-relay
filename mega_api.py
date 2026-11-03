@@ -51,8 +51,9 @@ class Mega:
         self._nodes = None
 
     def api(self, seq, n=None):
-        n = n or self.handle
-        url = f'https://g.api.mega.co.nz/cs?id={self.sid}&n={n}'
+        url = f'https://g.api.mega.co.nz/cs?id={self.sid}'
+        if n:
+            url += f'&n={n}'
         req = urllib.request.Request(url, data=json.dumps(seq).encode(),
                                      headers={'Content-Type': 'application/json', **UA})
         last = None
@@ -258,6 +259,23 @@ def main():
                 continue
             r = m.api(seq)
             print(seq[0].get('p', seq[0].get('n')), seq[0].get('a'), '->', repr(r)[:300])
+    elif mode == 'gdebug4':
+        h = sys.argv[3]
+        r = m.api([{'a': 'g', 'n': h}])
+        fh = r.get('fh') if isinstance(r, dict) else None
+        print('fh =', fh)
+        if fh:
+            for seq, label in (([{'a': 'g', 'p': fh}], 'p(fh) bare-url'),
+                               ([{'a': 'g', 'p': fh, 'v': 1}], 'p(fh,v1) bare-url'),
+                               ([{'a': 'g', 'p': fh, 'v': 1}], 'p(fh,v1) with-n')):
+                if 'with-n' in label:
+                    r2 = m.api(seq)
+                else:
+                    r2 = m.api(seq, n='')   # 不带 &n
+                print(label, '->', repr(r2)[:250])
+                if isinstance(r2, dict) and r2.get('g'):
+                    print('URL FOUND')
+                    break
     elif mode == 'gdebug3':
         h = sys.argv[3]
         r = m.api([{'a': 'g', 'n': h}])

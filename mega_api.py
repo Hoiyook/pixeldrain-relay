@@ -101,7 +101,7 @@ class Mega:
                         continue
                 fullkey = fk
                 break
-            out[h] = {'p': p, 't': t, 'name': name, 'size': size, 'key': fullkey}
+            out[h] = {'p': p, 't': t, 'name': name, 'size': size, 'key': fullkey, 'ts': int(n.get('ts', 0) or 0)}
         self._nodes = out
         return out
 

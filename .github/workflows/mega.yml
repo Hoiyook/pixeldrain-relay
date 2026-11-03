@@ -4,35 +4,16 @@ on:
     inputs:
       mode:  {required: true, type: string}
       link:  {required: true, type: string}
-      tag:   {required: false, type: string, default: ''}
 jobs:
   run:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
-      - name: Single file relay
-        if: ${{ inputs.mode == 'single' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          LINK: ${{ inputs.link }}
-          TAG: ${{ inputs.tag }}
+      - name: Browser probe
+        if: ${{ inputs.mode == 'browser' }}
         run: |
-          pip install --quiet pycryptodome 2>/dev/null || pip install --quiet --break-system-packages pycryptodome || true
-          set -uo pipefail
-          gh release create "$TAG" --title "$TAG" --notes single 2>/dev/null || true
-          python3 mega_single.py "$LINK" -o /tmp/dl.bin | tee /tmp/single.log
-          grep -q DOWNLOAD_OK /tmp/single.log || { echo GET_FAILED; exit 1; }
-          actual=$(stat -c%s /tmp/dl.bin)
-          expect=$(grep '^SIZE ' /tmp/single.log | awk '{print $2}')
-          [ "$actual" = "$expect" ] || { echo SIZE_MISMATCH; exit 1; }
-          NAME=$(grep '^NAME ' /tmp/single.log | sed 's/^NAME //' | python3 -c "import sys,json;print(json.load(sys.stdin))")
-          SAFE=$(echo "$NAME" | tr -c 'A-Za-z0-9._()-' '_' | sed 's/_\+/_/g; s/^_//; s/_$//; s/$/.PREFIX/' | sed 's/\.PREFIX$//')
-          SAFE="${SAFE:0:80}"
-          echo "文件名: $NAME -> 资产: $SAFE"
-          split -b 1900m -d /tmp/dl.bin "/tmp/${SAFE}.part-"
-          rm -f /tmp/dl.bin
-          gh release upload "$TAG" /tmp/"${SAFE}".part-* --clobber
-          rm -f /tmp/"${SAFE}".part-*
-          echo "UPLOADED $SAFE ($actual bytes)"
+          pip install --quiet playwright
+          python3 -m playwright install chromium --with-deps >/dev/null 2>&1 || python3 -m playwright install chromium
+          python3 browser_probe.py "${{ inputs.link }}"

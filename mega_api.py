@@ -165,8 +165,8 @@ class Mega:
         return mac
 
     def download(self, h, out_path, want_mac=True):
-        url, size = self.file_url(h)
         fk = self.by_handle(h)['key']
+        size = int(self.by_handle(h)['size'])
         aeskey = xor16(fk[:16], fk[16:])
         nonce = struct.unpack('>Q', fk[16:24])[0]
         expect = struct.unpack('>Q', fk[24:32])[0]
@@ -178,7 +178,8 @@ class Mega:
                 break
             cur -= cur % 16
             try:
-                req = urllib.request.Request(url, headers={**UA, 'Range': f'bytes={cur}-'})
+                gurl, _ = self.file_url(h)  # v:2 直链一次性, 每次尝试取新
+                req = urllib.request.Request(gurl, headers={**UA, 'Range': f'bytes={cur}-'})
                 resp = urllib.request.urlopen(req, timeout=120)
                 cipher = AES.new(aeskey, AES.MODE_CTR, nonce=b'', initial_value=(nonce << 64) + cur // 16)
                 with open(out_path, 'ab' if cur else 'wb') as f:

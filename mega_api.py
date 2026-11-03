@@ -258,6 +258,18 @@ def main():
                 continue
             r = m.api(seq)
             print(seq[0].get('p', seq[0].get('n')), seq[0].get('a'), '->', repr(r)[:300])
+    elif mode == 'gdebug3':
+        h = sys.argv[3]
+        r = m.api([{'a': 'g', 'n': h}])
+        print('step1 ->', repr(r)[:250])
+        fh = r.get('fh') if isinstance(r, dict) else None
+        if fh:
+            for seq in ([{'a': 'g', 'p': fh}], [{'a': 'g', 'p': fh, 'v': 1}], [{'a': 'g', 'n': fh}]):
+                r2 = m.api(seq)
+                print(f"step2 {seq[0]} ->", repr(r2)[:250])
+                if isinstance(r2, dict) and r2.get('g'):
+                    print('URL FOUND:', r2['g'][:100])
+                    break
     elif mode == 'gdebug2':
         h = sys.argv[3]
         # 找分享根句柄: f 响应里根节点的 h

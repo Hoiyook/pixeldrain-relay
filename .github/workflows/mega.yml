@@ -4,14 +4,70 @@ on:
     inputs:
       mode:  {required: true, type: string}
       link:  {required: true, type: string}
+      tag:   {required: false, type: string, default: ''}
 jobs:
   run:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
-      - run: pip install --quiet pycryptodome 2>/dev/null || pip install --quiet --break-system-packages pycryptodome || true
-      - name: Probe with keys
-        if: ${{ inputs.mode == 'probe' }}
-        run: python3 mega_api.py ls "${{ inputs.link }}"
+      - name: Install megatools
+        run: sudo apt-get install -y -qq megatools
+      - name: Login belt
+        if: ${{ inputs.mode == 'loginbelt' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LINK: ${{ inputs.link }}
+          TAG: ${{ inputs.tag }}
+          MEGA_USER: ${{ secrets.MEGA_USER }}
+          MEGA_PASS: ${{ secrets.MEGA_PASS }}
+        run: |
+          set -uo pipefail
+          if [ -z "$MEGA_USER" ]; then echo NO_CREDS; exit 1; fi
+          mkdir -p /tmp/dl /tmp/pf
+          gh release create "$TAG" --title "$TAG" --notes mega 2>/dev/null || true
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done.txt || true
+          echo "轮前资产: $(wc -l < /tmp/done.txt)"
+          # 预填已完成文件 (megatools 会跳过同名同大小文件)
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p "*.part-*" -D /tmp/pf --clobber >/dev/null 2>&1 || true
+          while IFS=$'\t' read -r h size asset name path sh ts; do
+            if ls /tmp/pf/${asset}.part-* >/dev/null 2>&1; then
+              mkdir -p "/tmp/dl/$path"
+              cat /tmp/pf/${asset}.part-* > "/tmp/dl/$path/$name"
+              rm -f /tmp/pf/${asset}.part-*
+            fi
+          done < mega_files.tsv
+          echo "预填: $(du -sB1 /tmp/dl | cut -f1) 字节"
+          cat > ~/.megatoolsrc <<CFG
+          [Account]
+          User = $MEGA_USER
+          Password = $MEGA_PASS
+          [Mega]
+          Downloads = /tmp/dl
+          Timeout = 300
+          CFG
+          echo "=== 登录+下载 (20分钟预算) ==="
+          timeout 1200 megatools dl --path /tmp/dl "https://mega.nz/folder/ZTYzCBxD#MDtV4ZqJ4UsgmuEMlr9pwQ" > /tmp/mt.log 2>&1 || true
+          tail -2 /tmp/mt.log
+          echo "=== 上传新完成文件 ==="
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/done2.txt || true
+          find /tmp/dl -type f ! -name ".*" -printf "%s\t%p\n" | sort -rn > /tmp/all_files.tsv
+          echo "实际文件: $(wc -l < /tmp/all_files.tsv)"
+          UP=0; MISS=0
+          while IFS=$'\t' read -r h size asset name path sh ts; do
+            grep -q "^${asset}\.part-" /tmp/done2.txt && continue
+            F="/tmp/dl/$path/$name"
+            if [ ! -f "$F" ] || [ "$(stat -c%s "$F")" != "$size" ]; then
+              F=$(awk -F'\t' -v s="$size" '$1 == s {print $2; exit}' /tmp/all_files.tsv)
+            fi
+            if [ -n "$F" ] && [ -f "$F" ] && [ "$(stat -c%s "$F")" = "$size" ]; then
+              split -b 1900m -d "$F" "/tmp/${asset}.part-"
+              gh release upload "$TAG" /tmp/"${asset}".part-* --clobber >/dev/null 2>&1 && UP=$((UP+1)) || echo "UPLOAD_FAIL $name"
+              rm -f /tmp/"${asset}".part-* "$F"
+              grep -vF "$F" /tmp/all_files.tsv > /tmp/af.tmp 2>/dev/null && mv /tmp/af.tmp /tmp/all_files.tsv || true
+            else
+              MISS=$((MISS+1))
+            fi
+          done < mega_files.tsv
+          echo "BELT_RESULT uploaded=$UP missing=$MISS"

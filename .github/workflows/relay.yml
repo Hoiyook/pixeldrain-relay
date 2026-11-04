@@ -1,47 +1,49 @@
-name: relay
+name: pdrelay
 on:
   workflow_dispatch:
     inputs:
-      only:
-        description: 'filename to relay'
-        required: true
-        type: string
+      pid:   {description: 'pixeldrain file id', required: true, type: string}
+      fname: {description: 'filename', required: true, type: string}
+      fsize: {description: 'size in bytes', required: true, type: string}
+      fsha:  {description: 'sha256 (optional)', required: false, type: string, default: ''}
+      tag:   {description: 'release tag', required: true, type: string}
 jobs:
-  relay:
+  r:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    permissions:
-      contents: write
+    timeout-minutes: 60
+    permissions: {contents: write}
     steps:
-      - uses: actions/checkout@v4
       - name: Relay one file
         env:
           GH_TOKEN: ${{ github.token }}
-          ONLY: ${{ inputs.only }}
+          PID:   ${{ inputs.pid }}
+          FNAME: ${{ inputs.fname }}
+          FSIZE: ${{ inputs.fsize }}
+          FSHA:  ${{ inputs.fsha }}
+          TAG:   ${{ inputs.tag }}
         run: |
-          set -euo pipefail
-          gh release create pd-relay --title pd-relay --notes relay 2>/dev/null || true
-          while IFS=$'\t' read -r id name size sha; do
-            [ "$name" = "$ONLY" ] || continue
-            exist=$(gh release view pd-relay --json assets --jq "[.assets[].name | select(startswith(\"${name}.part-\"))] | length")
-            if [ "$exist" -gt 0 ]; then echo "SKIP $name"; exit 0; fi
-            echo "=== RELAY $name ($id) $size bytes ==="
-            ok=0
-            for attempt in 1 2 3; do
-              rm -f /tmp/"${name}".part-*
-              curl -sS -L --retry 8 --retry-delay 10 --connect-timeout 30 "https://pixeldrain.com/api/file/$id?download" | split -b 1900m -d - "/tmp/${name}.part-"
-              total=$(du -bc /tmp/"${name}".part-* 2>/dev/null | tail -1 | cut -f1 || true)
-              if [ "$total" = "$size" ]; then
-                calc=$(cat /tmp/"${name}".part-* | sha256sum | awk '{print $1}')
-                if [ "$calc" = "$sha" ]; then ok=1; break; fi
-              fi
-              echo "attempt $attempt failed (size=$total)"
-            done
-            [ "$ok" = 1 ] || { echo "FILE_FAILED $name"; exit 1; }
-            gh release upload pd-relay /tmp/"${name}".part-* --clobber
-            rm -f /tmp/"${name}".part-*
-            echo "UPLOADED $name"
-            exit 0
-          done < files.tsv
-          echo "NOT_FOUND $ONLY"
-          exit 1
+          set -uo pipefail
+          gh release create "$TAG" --title "$TAG" --notes pd 2>/dev/null || true
+          exist=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq "[.assets[].name | select(startswith(\"$FNAME.part-\"))] | length" 2>/dev/null || echo 0)
+          if [ "${exist:-0}" -gt 0 ]; then echo "SKIP $FNAME (已中转)"; exit 0; fi
+          ok=0
+          for attempt in 1 2 3; do
+            rm -f /tmp/pd.bin
+            curl -sS -L --retry 5 --retry-delay 5 -o /tmp/pd.bin "https://pixeldrain.com/api/file/$PID?download" || true
+            sz=$(stat -c%s /tmp/pd.bin 2>/dev/null || echo 0)
+            [ "$sz" = "$FSIZE" ] || { echo "尺寸不符 $sz/$FSIZE (attempt $attempt)"; continue; }
+            if [ -n "$FSHA" ]; then
+              calc=$(sha256sum /tmp/pd.bin | awk '{print $1}')
+              [ "$calc" = "$FSHA" ] || { echo "SHA不符 (attempt $attempt)"; continue; }
+            fi
+            ok=1; break
+          done
+          [ "$ok" = 1 ] || { echo "FILE_FAILED $FNAME"; exit 1; }
+          split -b 1900m -d /tmp/pd.bin "/tmp/$FNAME.part-"
+          rm -f /tmp/pd.bin
+          i=0
+          for f in /tmp/$FNAME.part-*; do
+            gh release upload "$TAG" "$f" --clobber >/dev/null 2>&1 && i=$((i+1)) || echo "UPLOAD_FAIL $f"
+          done
+          rm -f /tmp/$FNAME.part-*
+          echo "RELAY_OK $FNAME chunks=$i"

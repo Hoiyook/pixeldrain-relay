@@ -23,7 +23,11 @@ jobs:
           TAG:   ${{ inputs.tag }}
         run: |
           set -uo pipefail
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes pd || echo "CREATE_FAIL(见上)"
+          # 幂等：已存在直接复用（2026-11-12 修复——此前重复派发会 422，
+          # 但后续步骤照跑，看起来正常实则无产物）
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes pd 2>/dev/null \
+            || gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null \
+            || { echo "RELEASE_UNAVAILABLE $TAG"; exit 1; }
           exist=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq "[.assets[].name | select(startswith(\"$FNAME.part-\"))] | length" 2>/dev/null || echo 0)
           if [ "${exist:-0}" -gt 0 ]; then echo "SKIP $FNAME (已中转)"; exit 0; fi
           ok=0
@@ -42,8 +46,14 @@ jobs:
           split -b 1900m -d /tmp/pd.bin "/tmp/$FNAME.part-"
           rm -f /tmp/pd.bin
           i=0
-          for f in /tmp/$FNAME.part-*; do
+          # "$FNAME" 必须带引号、* 留在引号外：文件名常含空格（如
+          # "thumbs 260307~2608.7z"），未引号展开会被拆成多个词，
+          # 两个都不匹配 → 0 块上传却仍报成功（2026-11-12 生产事故）
+          for f in "/tmp/$FNAME".part-*; do
+            [ -e "$f" ] || continue
             gh release upload "$TAG" "$f" --clobber --repo "$GITHUB_REPOSITORY" && i=$((i+1)) || echo "UPLOAD_FAIL $f"
           done
-          rm -f /tmp/$FNAME.part-*
+          rm -f "/tmp/$FNAME".part-*
+          # 0 块 = 中转失败，必须红（此前 echo RELAY_OK chunks=0 假成功）
+          [ "$i" -gt 0 ] || { echo "RELAY_FAIL $FNAME chunks=0"; exit 1; }
           echo "RELAY_OK $FNAME chunks=$i"

@@ -43,17 +43,22 @@ jobs:
             ok=1; break
           done
           [ "$ok" = 1 ] || { echo "FILE_FAILED $FNAME"; exit 1; }
-          split -b 1900m -d /tmp/pd.bin "/tmp/$FNAME.part-"
+          # 资产名净化（2026-11-18）：# 字符会被 gh CLI 当注释截断——
+          # "2025-08#211~213.7z.001" 上传时 stat /tmp/2025-08 not found。
+          # 与本地 pd.sh asset_name 同规则（非安全字符→.），两端名一致
+          ABASE=$(printf '%s' "$FNAME" | sed 's/[^A-Za-z0-9._-]/./g')
+          split -b 1900m -d /tmp/pd.bin "/tmp/$ABASE.part-"
           rm -f /tmp/pd.bin
           i=0
           # "$FNAME" 必须带引号、* 留在引号外：文件名常含空格（如
           # "thumbs 260307~2608.7z"），未引号展开会被拆成多个词，
           # 两个都不匹配 → 0 块上传却仍报成功（2026-11-12 生产事故）
-          for f in "/tmp/$FNAME".part-*; do
+          for f in "/tmp/$ABASE".part-*; do
             [ -e "$f" ] || continue
             gh release upload "$TAG" "$f" --clobber --repo "$GITHUB_REPOSITORY" && i=$((i+1)) || echo "UPLOAD_FAIL $f"
           done
-          rm -f "/tmp/$FNAME".part-*
+          rm -f "/tmp/$ABASE".part-*
           # 0 块 = 中转失败，必须红（此前 echo RELAY_OK chunks=0 假成功）
           [ "$i" -gt 0 ] || { echo "RELAY_FAIL $FNAME chunks=0"; exit 1; }
           echo "RELAY_OK $FNAME chunks=$i"
+
